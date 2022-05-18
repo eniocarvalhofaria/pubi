@@ -1,0 +1,240 @@
+delete from reports.PaymentsToPartners;
+commit;
+
+insert into reports.PaymentsToPartners
+select 
+	PaymentType
+,	PaymentCondition
+,	PaymentDate
+,	sum(AmountToPartner) AmountToPartner
+,	UnifiedDiscountId 
+,	date_part(year,PaymentDate) PaymentYear
+,	case	
+		when date_part(month,PaymentDate) = 1 then 'jan'
+		when date_part(month,PaymentDate) = 2 then 'fev'
+		when date_part(month,PaymentDate) = 3 then 'mar'
+		when date_part(month,PaymentDate) = 4 then 'abr'
+		when date_part(month,PaymentDate) = 5 then 'mai'
+		when date_part(month,PaymentDate) = 6 then 'jun'
+		when date_part(month,PaymentDate) = 7 then 'jul'
+		when date_part(month,PaymentDate) = 8 then 'ago'
+		when date_part(month,PaymentDate) = 9 then 'set'
+		when date_part(month,PaymentDate) = 10 then 'out'
+		when date_part(month,PaymentDate) = 11 then 'nov'
+		when date_part(month,PaymentDate) = 12 then 'dez'
+	end PaymentMonth
+,	date_part(day,PaymentDate) PaymentDay
+,	case
+		when PaymentDate between cast(getdate() as date) and cast(dateadd(day,4,getdate()) as date)
+		then 1
+		else 0
+	end PutEmailBody
+from
+(
+select
+	PaymentType
+,	PaymentCondition
+,	case
+		when datepart(dw, PaymentDate)  = 6
+		then dateadd(day,2, PaymentDate)
+		when datepart(dw, PaymentDate)  = 0
+		then dateadd(day,1, PaymentDate)
+		else PaymentDate
+	end PaymentDate
+,	AmountToPartner
+,	UnifiedDiscountId 
+from
+(
+select 
+	'Utilização de cupons' PaymentType
+,	ud.PaymentCondition
+,	cast(
+	case
+		when PaymentCondition = 'NT00'
+		then
+			case
+				when date_part(day,FufillmentDate) between 1 and 15 
+				then dateadd(day,cast(20 - date_part(day,FufillmentDate) as int),FufillmentDate)
+				else dateadd(month,1,dateadd(day, cast((date_part(day,FufillmentDate) * -1) + 5 as int),FufillmentDate))
+			end
+		when PaymentCondition = 'NT42'
+		then
+			case
+				when date_part(day,FufillmentDate) between 8 and 22 
+				then dateadd(day,cast(27 - date_part(day,FufillmentDate) as int),FufillmentDate)
+				when date_part(day,FufillmentDate) < 8 
+				then dateadd(day, cast((date_part(day,FufillmentDate) * -1) + 12 as int),FufillmentDate)
+				else dateadd(month,1,dateadd(day, cast((date_part(day,FufillmentDate) * -1) + 12 as int),FufillmentDate))
+			end
+		when PaymentCondition = 'NT21' 
+		then dateadd(day,
+				case
+					when datepart(dw, FufillmentDate) = 6
+					then 11
+					else (5 - datepart(dw, FufillmentDate)) + 5
+				end, FufillmentDate)
+	end as date) PaymentDate
+,	d.UnifiedDiscountId UnifiedDiscountId
+,	cast(cast(sum(DiscountValue * (1 - OurCommission)) as decimal(18,2)) as numeric(15,2)) AmountToPartner		
+
+from ods.Cupon c
+inner join reports.Discount d
+on c.DiscountId = d.DiscountId
+inner join ods.UnifiedDiscount ud
+on d.UnifiedDiscountId = ud.UnifiedDiscountId
+and PaymentCondition in ('NT21','NT00','NT42')
+left join (
+select unifieddiscountid from stage.unifieddiscountflags
+where disablepaymentbycoupon = 1
+) di 
+on d.unifieddiscountid = di.unifieddiscountid
+where FufillmentDate is not null
+and di.unifieddiscountid is null
+group by 1,2,3,4
+union all
+-- 1o pagamento
+select 
+	cast('Cupons vendidos - 1o pagamento' as varchar(100)) PaymentType
+,	ud.PaymentCondition
+,	dateadd(day,30,LastDate) PaymentDate
+,	ud.UnifiedDiscountId  
+,	cast(sum(
+	case
+		when ud.PaymentCondition in ('NT01', 'NT05','NT09','NT10', 'NT15','NT16')
+		then pc.AssuredPercentage / 2
+		when ud.PaymentCondition in ('0030','NT11','NT12','NT13','NT14')
+		then pc.AssuredPercentage 
+	end * AmmountToPartner) as numeric(15,2)) AmmountToPartner
+
+from reports.UnifiedDiscountRevenue udr
+left join ods.UnifiedDiscount ud
+on udr.UnifiedDiscountId = ud.UnifiedDiscountId
+inner join reports.PaymentCondition pc
+on ud.PaymentCondition = pc.PaymentCondition
+where  IsActive = 0
+and
+		pc.AssuredPercentage > 0
+	and 
+			(	
+				Description like 'Pagável em 30%' or
+				Description = '30 dias'
+			)
+group by 1,2,3,4
+
+union all
+
+
+select 
+	'Cupons vendidos - 2o pagamento' PaymentType
+,	pc.PaymentCondition
+,	dateadd(day,60,LastDate) PaymentDate
+,	ud.UnifiedDiscountId 
+,	cast(sum(
+	case
+		when pc.PaymentCondition in ('NT01','NT05','NT09','NT10', 'NT15','NT16')
+		then pc.AssuredPercentage / 2
+	end * AmmountToPartner) as numeric(15,2)) AmmountToPartner
+from reports.UnifiedDiscountRevenue udr
+left join ods.UnifiedDiscount ud
+on udr.UnifiedDiscountId = ud.UnifiedDiscountId
+inner join reports.PaymentCondition pc
+on ud.PaymentCondition = pc.PaymentCondition
+where  IsActive = 0
+and
+		pc.PaymentCondition in ('NT01','NT05','NT09','NT10', 'NT15','NT16')
+group by 1,2,3,4
+
+union all
+
+select 
+	'Cupons vendidos - Pagamento em ciclos' PaymentType
+,	PaymentCondition
+,	PaymentDate
+,	UnifiedDiscountId 
+,	cast(sum(AmountToPartner) as numeric(15,2)) AmountToPartner
+
+from
+(
+select 
+	udr.UnifiedDiscountId
+,	ud.PaymentCondition
+,	dateadd(day,
+	case
+		when
+			datediff(day,
+				dateadd(day,
+					case
+						when ud.PaymentCondition = 'NT32'
+						then 2
+						when ud.PaymentCondition = 'NT33'
+						then 10
+						when ud.PaymentCondition = 'NT34'
+						then 25
+					end,
+					FirstDate
+					  ), EventDate
+			        ) < 1 
+	    then 0
+	    else 
+		cast((datediff(day,
+				dateadd(day,
+					case
+						when ud.PaymentCondition = 'NT32'
+						then 2
+						when ud.PaymentCondition = 'NT33'
+						then 10
+						when ud.PaymentCondition = 'NT34'
+						then 25
+					end,
+					FirstDate
+					  ), EventDate
+			        )  / 
+				case
+					when ud.PaymentCondition = 'NT32'
+					then 7
+					when ud.PaymentCondition = 'NT33'
+					then 15
+					when ud.PaymentCondition = 'NT34'
+					then 30
+				end) as int) + 1
+	end *
+	case
+		when ud.PaymentCondition = 'NT32'
+		then 7
+		when ud.PaymentCondition = 'NT33'
+		then 15
+		when ud.PaymentCondition = 'NT34'
+		then 30
+	end, 
+	dateadd(day,
+		case
+			when ud.PaymentCondition = 'NT32'
+			then 7
+			when ud.PaymentCondition = 'NT33'
+			then 15
+			when ud.PaymentCondition = 'NT34'
+			then 30
+		end,FirstDate
+			)
+	) PaymentDate
+,	cast(sum(dr.AmmountToPartner) as numeric(15,2)) AmountToPartner
+from reports.UnifiedDiscountRevenue udr
+inner join ods.UnifiedDiscount ud
+on udr.UnifiedDiscountID = ud.UnifiedDiscountID
+inner join reports.DiscountRevenue dr
+on dr.UnifiedDiscountID = udr.UnifiedDiscountID
+and dr.SalesPageId =  udr.PageId
+where  FirstDate >= '2013-05-01'
+and	ud.PaymentCondition in ('NT32','NT33','NT34')
+group by 1,2,3
+having cast(sum(DR.AmmountToPartner) as numeric(15,2)) > 0
+) y
+group by 1,2,3,4
+
+) x
+) A
+group by 1,2,3,5,6,7,8,9;
+
+commit
+;
+

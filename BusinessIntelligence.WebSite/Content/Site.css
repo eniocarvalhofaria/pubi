@@ -1,0 +1,540 @@
+﻿/*----------------------------------------------------------
+The base color for this template is #5c87b2. If you'd like
+to use a different color start by replacing all instances of
+#5c87b2 with your new color.
+----------------------------------------------------------*/
+
+body
+{
+    font-size: 0.875em;
+    color: #333333;
+    font-family: "Helvetica Light" , Helvetica, "Droid Sans" , Arial, Arial Unicode, sans-serif;
+    line-height: 1.45;
+}
+.wrapperShadow {
+margin: 0 3em;
+-moz-box-shadow: 0 0 2.5em .5em rgba(0, 0, 0, 0.4);
+-webkit-box-shadow: 0 0 2.5em .5em rgba(0, 0, 0, 0.4);
+box-shadow: 0px 0px 2.5em .5em rgba(0, 0, 0, 0.4);
+}
+.wrapperShadow {
+position: relative;
+}
+ul, menu, dir {
+display: block;
+list-style-type: disc;
+-webkit-margin-before: 1em;
+-webkit-margin-after: 1em;
+-webkit-margin-start: 0px;
+-webkit-margin-end: 0px;
+-webkit-padding-start: 40px;
+}
+#regionHeader .wrapperShadow {
+background-color: #FFF;
+min-height: 48px;
+}
+
+#siteLogo {
+display: block;
+position: absolute;
+left: 0;
+bottom: 10px;
+width: 80px;
+height: 82px;
+vertical-align: middle;
+}
+.clearfix:before, .clearfix:after, .wrapper:before, .wrapper:after, #content:before, #content:after, .boxSupplement:before, .boxSupplement:after
+{
+    content: "";
+    display: table;
+}
+.wrapper:after, .clearfix:after, #content:after, .boxSupplement:before, .boxSupplement:after
+{
+    clear: both;
+}
+.clearfix:before, .clearfix:after, .wrapper:before, .wrapper:after, #content:before, #content:after, .boxSupplement:before, .boxSupplement:after
+{
+    content: "";
+    display: table;
+}
+
+
+a:visited
+{
+    color: #505abc;
+}
+
+a:hover
+{
+    color: #1d60ff;
+    text-decoration: none;
+}
+
+a:active
+{
+    color: #12eb87;
+}
+
+
+
+header, footer, nav, section
+{
+    display: block;
+}
+
+/* HEADINGS   
+----------------------------------------------------------*/
+
+
+h1
+{
+    font-size: 2em;
+    padding-bottom: 0;
+    margin-bottom: 0;
+}
+
+h2
+{
+    padding: 0 0 10px 0;
+}
+
+h3
+{
+    font-size: 1.2em;
+}
+
+h4
+{
+    font-size: 1.1em;
+}
+
+h5, h6
+{
+    font-size: 1em;
+}
+
+/* PRIMARY LAYOUT ELEMENTS   
+----------------------------------------------------------*/
+
+/* you can specify a greater or lesser percentage for the 
+page width. Or, you can specify an exact pixel width. */
+.page
+{
+    width: 100%;
+    height: 100%;
+    margin-left: auto;
+    margin-right: auto;
+}
+
+header, #header
+{
+    position: relative;
+    margin-bottom: 0px;
+    color: #000;
+    padding: 0;
+    background-color: #17679D;
+}
+/*
+header h1, #header h1
+{
+    font-weight: bold;
+    padding: 0px 0;
+    margin: 0;
+    color: #FFFFFF;
+    border: none;
+    line-height: 2em;
+    font-size: 32px !important;
+    text-shadow: 1px 1px 2px #111;
+}
+*/
+html {
+font-size: 1em;
+}
+#main
+{
+    padding: 30px 30px 15px 30px;
+    background-color: #FFFFFF;
+    border-radius: 4px 0 0 0;
+    -webkit-border-radius: 4px 0 0 0;
+    -moz-border-radius: 4px 0 0 0;
+    min-height: 480px;
+}
+
+footer, #footer
+{
+    background-color: #fff;
+    color: #999;
+    padding: 10px 0;
+    text-align: center;
+    line-height: normal;
+    margin: 0 0 30px 0;
+    font-size: .9em;
+    border-radius: 0 0 4px 4px;
+    -webkit-border-radius: 0 0 4px 4px;
+    -moz-border-radius: 0 0 4px 4px;
+}
+
+/* TAB MENU   
+----------------------------------------------------------*/
+ul#menu
+{
+    border-bottom: 1px #5C87B2 solid;
+    padding: 0 0 2px;
+    position: relative;
+    margin: 0;
+    text-align: right;
+    text-decoration: none;
+}
+
+ul#menu li
+{
+    display: inline;
+    list-style: none;
+}
+
+ul#menu li#greeting
+{
+    padding: 10px 20px;
+    font-weight: bold;
+    text-decoration: none;
+    line-height: 2.8em;
+    color: #fff;
+}
+
+a:-webkit-any-link {
+color: -webkit-link;
+text-decoration: none;
+cursor: auto;
+}
+
+ul#menu li a:hover
+{
+    background-color: #fff;
+    text-decoration: none;
+    
+}
+
+ul#menu li a:active
+{
+    background-color: #a6e2a6;
+    text-decoration: none;
+}
+
+ul#menu li.selected a
+{
+    background-color: #fff;
+    color: #000;
+}
+
+/* FORM LAYOUT ELEMENTS   
+----------------------------------------------------------*/
+
+fieldset
+{
+    border: 1px solid #ddd;
+    padding: 0 1.4em 1.4em 1.4em;
+    margin: 0 0 1.5em 0;
+}
+
+legend
+{
+    font-size: 1.2em;
+    font-weight: bold;
+}
+
+textarea
+{
+    min-height: 75px;
+}
+
+input[type="text"], input[type="password"]
+{
+    border: 1px solid #ccc;
+    padding: 2px;
+    font-size: 1.2em;
+    color: #444;
+    width: 200px;
+}
+
+select
+{
+    border: 1px solid #ccc;
+    padding: 2px;
+    font-size: 1.2em;
+    color: #444;
+}
+
+input[type="submit"]
+{
+    font-size: 1.2em;
+    padding: 5px;
+}
+
+/* TABLE
+----------------------------------------------------------*/
+
+table
+{
+    border: solid 1px #e8eef4;
+    border-collapse: collapse;
+}
+
+/*
+table td {
+    padding: 5px;
+    border: solid 1px #e8eef4;
+}*/
+
+table th
+{
+    padding: 6px 5px;
+    text-align: left;
+    background-color: #e8eef4;
+    border: solid 1px #e8eef4;
+}
+
+
+/* MISC  
+----------------------------------------------------------*/
+.clear
+{
+    clear: both;
+}
+
+.error
+{
+    color: Red;
+}
+
+nav, #menucontainer
+{
+    margin-top: 40px;
+}
+
+div#logo
+{
+    display: block;
+    float: left;
+    text-align: left;
+}
+
+div#language
+{
+    float: right;
+    margin-right: 26px;
+}
+div#userLogged
+{
+    float: right;
+    margin-right: 32px;
+}
+#regionPrimaryNav
+{
+    background-color: #65605E;
+    border-top: 2px solid #65605E;
+    border-bottom: 2px solid #65605E;
+    overflow: hidden;
+}
+.wrapper
+{
+    margin: 0 auto;
+    max-width: 1140px;
+    min-width: 801px;
+    width: auto;
+}
+
+h #regionHeader
+{
+    background-color: #ECEAE7;
+}
+div#sitelogo
+{
+    background-color: #001088;
+}
+#siteName {
+color: #65605E;
+letter-spacing: 1px;
+line-height: 1;
+padding: 0;
+position: absolute;
+left: 95px;
+bottom: 15px; 
+text-align: center;
+width: auto;
+font-size: 100%;
+font-weight: normal;
+
+margin: 0;
+}
+#primaryNav ul {
+margin: 0px 15px 0px 80px;
+}
+/*
+#logindisplay
+{
+    font-size: 1.1em;
+    display: block;
+    text-align: right;
+    margin: 10px;
+    color: #999999;
+}
+
+#logindisplay a:link
+{
+    color: white;
+    text-decoration: underline;
+}
+
+#logindisplay a:visited
+{
+    color: white;
+    text-decoration: underline;
+}
+
+#logindisplay a:hover
+{
+    color: white;
+    text-decoration: none;
+}
+*/
+/* Styles for validation helpers
+-----------------------------------------------------------*/
+.field-validation-error
+{
+    color: #ff0000;
+}
+
+.field-validation-valid
+{
+    display: none;
+}
+
+.input-validation-error
+{
+    border: 1px solid #ff0000;
+    background-color: #ffeeee;
+}
+
+.validation-summary-errors
+{
+    font-weight: bold;
+    color: #ff0000;
+}
+
+.validation-summary-valid
+{
+    display: none;
+}
+
+/* Styles for editor and display helpers
+----------------------------------------------------------*/
+.display-label, .editor-label
+{
+    margin: 1em 0 0 0;
+}
+
+.display-field, .editor-field
+{
+    margin: 0.5em 0 0 0;
+}
+
+.text-box
+{
+    width: 30em;
+}
+
+.text-box.multi-line
+{
+    height: 6.5em;
+}
+
+.tri-state
+{
+    width: 6em;
+}
+.tblanguages
+{
+    border: solid 0px #FFFFFF;
+    border-collapse: collapse;
+    width: 88px;
+
+}
+.brazilflag
+{
+        padding-left: 0px;
+         padding-right: 2px;
+    }
+ .usaflag
+{
+        padding-left: 2px;
+         padding-right: 0px;
+    }
+.tdlanguage
+{
+    height: 10px;
+    color: #999999;
+    font-family: "calibri";
+    font-size: 9pt;
+    font-weight: bold;
+    border: solid 0px #FFFFFF;
+}
+#regionHeader, #regionPrimaryNav, #regionMain {
+min-width: 801px;
+}
+regionHeader {
+background-color: #ECEAE7;
+}
+#primaryNav li.section a, #siteLogo, #regionHeader, #secondaryNav li.current a {
+background-color: #1A3E5B;
+}
+html, body, div, span, object, iframe, h1, h2, h3, h4, h5, h6, p, blockquote, pre, a, abbr, address, cite, code, del, dfn, em, img, ins, q, small, strong, sub, sup, dl, dt, dd, ol, ul, li, fieldset, figure, form, label, legend, table, caption, tbody, tfoot, thead, tr, th, td {
+border: 0;
+margin: 0;
+padding: 0;
+-webkit-text-size-adjust: none;
+}
+user agent stylesheetdiv {
+display: block;
+}
+
+#primaryNav li {
+list-style-type: none;
+list-style-image: none;
+float: left;
+    height: 32px;
+}
+
+#primaryNav a {
+display: block;
+padding: 10px 10px;
+min-height: 16px;
+color: #FFFFFF;
+}
+#regionHeader, #regionPrimaryNav, #regionMain {
+min-width: 801px;
+}
+
+#regionHeader {
+background-color: #ECEAE7;
+}
+
+img.logo {
+
+    display: block;
+
+    margin-top: 20px;
+
+    margin-bottom: 20px ;
+    
+    margin-left: 0px;
+    
+     margin-right: 0px;
+  max-width: 100%;
+    
+    }
+    
+    
+    #primaryNav li.login {
+display: block;
+float: right;
+}

@@ -1,0 +1,123 @@
+--cupom motivo cancelamento
+TRUNCATE TABLE stage.cupom_tipo_motivo_cancelamento; 
+INSERT INTO stage.cupom_tipo_motivo_cancelamento
+WITH CTE AS (
+             SELECT DISTINCT
+                               ISNULL(Fim.CuponID,X.CuponID) CuponID
+                             , ISNULL(Fim.TipoCancelamento,X.TipoCancelamento) TipoCancelamento
+                             , replace(ISNULL(ISNULL(Fim.Motivo,X.Motivo),'Indeterminado'), '"', '') Motivo
+                             , ISNULL(Fim.Rowno,X.Rowno) Rowno
+                FROM(
+                     SELECT  RCC.CuponID
+                           , CASE WHEN chargebackrefundtypeid = 1 THEN 'Intermediaria PU'
+                                  WHEN chargebackrefundtypeid = 2 THEN 'Direct Transfer Refund'
+                                  WHEN chargebackrefundtypeid = 3 THEN 'Chargeback'
+                                  END AS TipoCancelamento
+                           , CASE WHEN chargebackrefundtypeid = 1 THEN isnull(RES.reasondescription, rsr.name)
+                                  WHEN chargebackrefundtypeid = 2 THEN isnull(RES.reasondescription, rsr.name)
+                                  WHEN chargebackrefundtypeid = 3 THEN 'Chargeback'
+                                  END AS Motivo
+                           , chargebackrefundtypeid as Rowno      
+                     FROM ods.RefundChargeBack RC
+                     INNER JOIN stage.RefundChargeback_Cupon RCC
+          	           ON RCC.RefundChargebackID = RC.RefundChargeBackID
+                     LEFT JOIN stage.refundcancelreason RES
+          	           ON RES.reasonid = RC.reasonid
+                     INNER JOIN ods.cancellations C
+                     	ON C.CuponId = RCC.Cuponid
+                     --Adicionado em 20170522 por causa do volume de indeterminado
+                      left join (select  r1.purchaseid
+          	         					,r2.requestsubreasonid
+          	         				from (          	         
+			          	         			select purchaseid, max(requestrefundid) requestrefundid
+			          	         				from nemo.requestrefund
+			          	         			group by
+			          	         				purchaseid
+			          	         		) r1
+			          	         	left join nemo.requestrefund r2
+			          	         		on r2.requestrefundid = r1.requestrefundid
+          	         		   ) rr
+          	         	on rr.purchaseid = rc.purchaseid
+          	         left join nemo.requestsubreason rsr
+          	         	on rsr.requestsubreasonid = rr.requestsubreasonid 
+                     --	
+                     union                     
+                     SELECT RCC.CuponID
+                          , 'CreditoPU' AS TipoCancelamento
+                          , isnull(RES.reasondescription, rsr.name) AS Motivo
+                          , 0 as Rowno
+                     FROM stage.RefundCredit RC
+                     INNER JOIN stage.RefundCredit_Cupon RCC
+                     	ON RCC.RefundCreditID = RC.RefundCreditID
+                     LEFT JOIN stage.refundcancelreason RES
+                     	ON RES.reasonid = RC.reasonid
+                     INNER JOIN ods.cancellations C
+          	           ON C.CuponId = RCC.Cuponid
+          	         --Adicionado em 20170522 por causa do volume de indeterminado
+                      left join (select  r1.purchaseid
+          	         					,r2.requestsubreasonid
+          	         				from (          	         
+			          	         			select purchaseid, max(requestrefundid) requestrefundid
+			          	         				from nemo.requestrefund
+			          	         			group by
+			          	         				purchaseid
+			          	         		) r1
+			          	         	left join nemo.requestrefund r2
+			          	         		on r2.requestrefundid = r1.requestrefundid
+          	         		   ) rr
+          	         	on rr.purchaseid = rc.purchaseid
+          	         left join nemo.requestsubreason rsr
+          	         	on rsr.requestsubreasonid = rr.requestsubreasonid 
+                     --	                     
+                     )Fim
+                FULL JOIN (
+                           SELECT DISTINCT  CCR.CuponId
+                                          , RES.reasondescription AS Motivo
+                                          , 'CreditoPU' AS TipoCancelamento
+                                          , 0 as Rowno
+                           FROM stage.couponcancelationrequest CCR
+                           LEFT JOIN stage.refundcancelreason RES
+                           	ON RES.reasonid = CCR.reasonid
+                           INNER JOIN ods.cancellations C
+                           	ON C.CuponId = CCR.Cuponid	
+                           ) X
+                ON X.CuponId = Fim.Cuponid
+             )
+, TRE AS (
+          SELECT DISTINCT CuponID
+                        , Motivo
+                        , CASE WHEN Motivo = 'Chargeback' THEN 5
+                               WHEN Motivo = 'Cartão clonado' THEN 4
+                               WHEN Motivo = 'Conta Invadida' THEN 3
+                               WHEN Motivo = 'Problemas com antifraude' THEN 2
+                               ELSE 1
+                               END AS Prioridade
+          FROM CTE                        
+          )
+         
+SELECT DISTINCT   
+         CA.CuponID
+       , CA.purchaseid
+       , ISNULL(TipoCancelamento,'Indeterminado') TipoCancelamento
+       , ISNULL(Motivo,'Indeterminado') Motivo
+FROM ods.cancellations CA       
+LEFT JOIN (
+           SELECT   
+                 CuponID
+               , TipoCancelamento
+               , DENSE_RANK() OVER (partition by CuponID ORDER BY Rowno DESC,Motivo,TipoCancelamento) AS RowTo
+           FROM CTE
+           ) N
+	ON N.Cuponid = CA.CuponId
+	AND N.RowTo = 1
+LEFT JOIN (
+           SELECT   
+                 CuponID
+               , Motivo
+               , DENSE_RANK() OVER (partition by CuponID ORDER BY Prioridade DESC,Motivo) AS RowTo
+           FROM TRE
+           ) X
+	ON X.Cuponid = CA.CuponId
+	AND X.RowTo = 1	
+WHERE EXTRACT(YEAR FROM Ca.cancellationdate) > 2013	
+;commit;

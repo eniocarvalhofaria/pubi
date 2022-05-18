@@ -1,0 +1,115 @@
+TRUNCATE TABLE reports.vendas_diarias_publicacao
+;commit;
+
+
+INSERT INTO reports.vendas_diarias_publicacao
+SELECT 
+    Contract_number
+,	pagename
+,	Tag_region
+,	bairro
+,	dateforsale
+,	uid
+,	idoferta
+,	DiscountName
+,	partnername
+,	category_name
+,	tipo_site
+,	categoria_site
+,	sub_categoria_site
+,	sub_sub_categoria
+,	tipo_de_pagamento
+,	condicao_pagamento
+,	expire_date
+,	discount_start
+,	discount_end
+,	proprietario_oferta
+,	team
+,	coordinator
+,	manager
+,	public
+,	grupo_economico
+,	campanha_marketing
+,	fonte_de_pesquisa
+,	fonte_de_pesquisa_oferta
+,	planner
+,	coordinators "Coord Plan"
+,	CASE WHEN grosssalespucommission = 0 THEN 0 ELSE grosssalespucommission/grosssales END AS commission
+,	grosssales
+,	grosssalespucommission
+,	cancelamento_pre_pu
+,	cancelamento_pos_pu
+,	noshow
+,	rol
+,	sold_cupons
+,	venda_mobile
+	---
+,	lucro_bruto
+,   taxa_parcelamento
+,   taxa_adquirente
+,   taxa_carrinho
+,   antifraude
+,   promocodes
+,   custo_antecipacao
+,   cancelamento_promocodes           
+,   venda_web
+,   venda_responsivo
+,   venda_email  
+FROM(
+select 
+	Contract_number
+,	pagename
+,	accountregion Tag_region
+,	bairro
+,	dateforsale
+,	uid
+,	idoferta
+,	partnername
+,	category_name
+,	tipo_site
+,	categoria_site
+,	sub_categoria_site
+,	sub_sub_categoria
+,	tipo_de_pagamento
+,	condicao_pagamento
+,	expire_date
+,	discount_start
+,	discount_end
+,	proprietario_oferta
+,	team
+,	coordinator
+,	manager
+,	public
+,	grupo_economico
+,	campanha_marketing
+,	fonte_de_pesquisa
+,	fonte_de_pesquisa_oferta
+,	planner
+,	coordinators
+,	CAST(TRIM(regexp_replace(Max(Discountname), '\r|\n|\t','g')) AS VARCHAR(255)) as DiscountName
+,	sum(grosssales) grosssales
+,	sum(grosssalespucommission) grosssalespucommission
+,	sum(cancelamento_pre_pu) cancelamento_pre_pu
+,	sum(cancelamento_pos_pu) cancelamento_pos_pu
+,	sum(noshow) noshow
+,	sum(rol) rol
+,	SUM(sold_cupons) sold_cupons
+,	sum(venda_mobile) venda_mobile
+	---
+,	sum(lucro_bruto) lucro_bruto
+,   sum(taxa_parcelamento) taxa_parcelamento
+,   sum(taxa_adquirente) taxa_adquirente
+,   sum(taxa_carrinho) taxa_carrinho
+,   sum(antifraude) antifraude
+,   sum(promocodes) promocodes
+,   sum(custo_antecipacao) custo_antecipacao
+,   sum(cancelamento_promocodes) cancelamento_promocodes           
+,   sum(venda_web) venda_web
+,   sum(venda_responsivo) venda_responsivo
+,   sum(venda_email) venda_email   
+from reports.dailyentries
+where dateforsale::date between (current_date - Interval '15 day')::date and (getdate()-1)::date
+group by
+	1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29
+having sum(rol) <> 0 or sum(grosssales) <> 0)
+;commit;

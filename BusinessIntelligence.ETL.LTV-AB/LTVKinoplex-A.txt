@@ -1,0 +1,13 @@
+﻿
+
+		sale.UnifiedDiscountID in 
+		(
+		select
+			UnifiedDiscountId
+			from ods.UnifiedDiscount ud
+			inner join reports.Contract c
+			on ud.ContractId = c.ContractId
+			inner join reports.account acc
+			on acc.accountid = c.accountid
+			where acc.accountname = 'Kinoplex'
+		)

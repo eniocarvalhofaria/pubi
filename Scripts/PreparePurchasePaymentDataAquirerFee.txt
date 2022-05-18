@@ -1,0 +1,80 @@
+drop table if exists #purchases
+;
+
+select
+	pur.purchaseid
+,	pur.DiscountId
+,	case when pur.SourceId = 2 then 2 when pur.SourceId = 3 or pur.httpreferrer like '%OS: android%' or pur.httpreferrer like '%OS: ios%' then 3 else 1 end SourceId
+,	pur.purchasestatusid
+,	pur.regionid
+,	pur.paymentTypeId
+,	case when pur.numPayments is null or pur.numPayments = 0 then 1 else pur.numPayments end numPayments
+,	pur.unitvalue
+,	pur.quantity
+,	pur.totalvalue
+into 
+#purchases
+from ods.Purchase pur 
+inner join stage.PurchaseStatus ps
+on pur.PurchaseStatusID = ps.PurchaseStatusId
+and countsAsRevenue = 1
+left join reports.purchasepaymentdataaquirerfee ar
+on pur.purchaseid = ar.purchaseid
+where ar.purchaseid is null
+;
+
+
+
+drop table if exists #purchasepaymentdataaquirerfee
+;
+select 
+	x.*
+,	x.TotalValue * f.fee AquirerFee
+into #purchasepaymentdataaquirerfee
+from
+(
+select
+	PurchasePaymentDataID
+,	internalreferencenumber PurchaseId
+,	pur.DiscountId
+,	pur.SourceId
+,	cast(laststatusdate as date) EventDate
+,	case 
+		when ppd.paymentmethodid in (17,35,40) then 5
+		when ppd.paymentmethodid in (42,44,57,58) then 9
+		when ppd.paymentcreditcardtypeid =4 then 1
+		when ppd.paymentmethodid in (48,49,52,53) then 7
+		when ppd.paymentmethodid in (47,47,50,51) then 8
+		when ppd.paymentmethodid in (41,43) then 6
+		when ppd.paymentmethodid in (6,14)
+		then 
+			case
+				when paymentTypeId = 3 then 4
+				when paymentTypeId = 2 then 2
+				else 3
+			end
+		else 6 
+	end AquirerRuleId
+,	pur.purchasestatusid
+,	pur.regionid
+,	pur.numPayments
+,	pur.unitvalue
+,	pur.quantity
+,	pur.totalvalue
+from #purchases pur
+
+inner join ods.purchasepaymentdata ppd
+on pur.PurchaseID = ppd.InternalReferenceNumber
+
+) x 
+left join reports.aquirerfee f
+on f.aquirerruleid = x.aquirerruleid
+and x.numpayments between f.startnumpayments and f.endnumpayments
+;
+insert into reports.purchasepaymentdataaquirerfee
+select * from #purchasepaymentdataaquirerfee
+;
+
+
+
+

@@ -1,0 +1,452 @@
+
+if(<@campaignDate@> = '')
+{
+	set select cast(cast(getdate() as date) - interval '1 day' as date) campaignDate; 
+}else
+{
+set select cast(<@campaignDate@> as date) campaignDate
+}
+
+cursor c1 select name campaignname from reports.appprod_campaign
+where sentdate = date <@campaignDate@> and mailinguserscount > 0
+{
+
+print ('Gerando resultado de: ' + <@c1.campaignname@>);
+
+drop table if exists #CampaignUnifiedDiscount;
+drop table if exists #CampaignEmailInfo;
+drop table if exists #CampaignUsers;
+drop table if exists #tempSales;
+drop table if exists #CampaignRevenue;
+drop table if exists #CampaignCustomers;
+
+
+set select 
+	Id campaignId
+from reports.appprod_Campaign
+where Name = <@c1.campaignname@>;
+
+
+select distinct UnifiedDiscounts UnifiedDiscountId 
+into #CampaignUnifiedDiscount
+from reports.appprod_Campaign_UnifiedDiscounts where Id = <@campaignId@>;
+
+
+
+select * 
+into #CampaignEmailInfo
+from
+(
+select  
+	Sents 
+,	Opens
+,	Clicks
+,	Spams
+,	Unsubscribes
+,	Bounce
+,	Confined
+,	Delivered
+,	MailingId
+,	rank() over(order by MailingId) ordem
+from reports.EmailInfo
+where Campaign like <@c1.campaignName@> + '%'
+) x
+where ordem = 1;
+
+set select count(*) qtde from  #CampaignEmailInfo;
+
+print(<@qtde@>);
+
+select distinct
+	UserAccountID
+,	MailingUserTypeId
+into #CampaignUsers
+from reports.MailingUserAccount
+where CampaignId = <@campaignId@>;
+
+set select count(*) qtde from  #CampaignUsers;
+
+print(<@qtde@>);
+
+select
+	PurchaseId
+,	GrossSales
+,	GrossRevenue
+,	Promocodes
+,	QTYSoldCoupons
+,	qtyTransactions
+,	UserAccountId
+,	LandingPageUrl
+,	UnifiedDiscountId
+,	EventDate
+,	case 
+		when d.validDate is not null
+		then cast(SentYear + '-' + SentMonth + '-' + SentDay as date)
+		else null
+	end  SentDate
+into #tempSales
+from
+(
+select
+	PurchaseId
+,	GrossSales
+,	GrossRevenue
+,	Promocodes
+,	QTYSoldCoupons
+,	qtyTransactions
+,	UserAccountId
+,	LandingPageUrl
+,	UnifiedDiscountId
+,	EventDate
+,	Campaign
+,	case
+			when Campaign like 'CRMBR%' and substring(Campaign,6,1) not in ('1','2')  then substring(campaign,11,2)
+			when Campaign like 'CRMBR%' then substring(campaign,10,2)
+			when Campaign like 'RMKT%' then substring(campaign,9,2)
+			else replace(substring(Campaign, charindex('_',Campaign) + 1 ,2),'_','') 
+		end SentDay
+	,	case
+			when Campaign like 'CRMBR%' and substring(Campaign,6,1) not in ('1','2') then '20' + substring(campaign,7,2)
+			when Campaign like 'CRMBR%' then '20' + substring(campaign,6,2)
+			when Campaign like 'RMKT%' then '20' + substring(campaign,5,2)
+			when substring(Campaign, len(Campaign) - 3, 2) = '20'
+			then substring(Campaign, len(Campaign) - 3, 4)
+		end SentYear
+	,	case
+			when Campaign like 'CRMBR%' and substring(Campaign,6,1) not in ('1','2') then substring(campaign,9,2)
+			when Campaign like 'CRMBR%' then substring(campaign,8,2)
+			when Campaign like 'RMKT%' then substring(campaign,7,2)
+			when Campaign like '%janeiro%' then '01'
+			when Campaign like '%fevereiro%' then '02'
+			when Campaign like '%_mar%' then '03'
+			when Campaign like '%abril%' or Campaign like '%april%' then '04'
+			when Campaign like '%maio%' then '05'
+			when Campaign like '%junho%' then '06'
+			when Campaign like '%julho%' then '07'
+			when Campaign like '%agosto%' then '08'
+			when Campaign like '%setembro%' then '09'
+			when Campaign like '%outubro%' then '10'
+			when Campaign like '%novembro%' then '11'
+			when Campaign like '%dezembro%' then '12'
+			else null
+		end SentMonth
+from
+(
+select 
+	s.PurchaseId
+,	GrossSales
+,	GrossRevenue
+,	Promocodes
+,	QTYSoldCoupons
+,	qtyTransactions
+,	UserAccountId
+,	LandingPageUrl
+,	UnifiedDiscountId
+,	EventDate
+,	replace(UtmCampaignLandingPageUrl,'"','') Campaign
+
+from ods.Sales s
+left join reports.PurchaseUrl pu
+on s.PurchaseId = pu.PurchaseId
+where EventDate = cast(<@campaignDate@> as date)
+and s.Type = 1
+) x
+) y
+left join 
+	(select cast(date as char(10)) validDate from reports.calendar) d
+on (SentYear + '-' + SentMonth + '-' + SentDay) = validDate
+
+;
+
+set select count(*) qtde from  #tempSales;
+
+print(<@qtde@>);
+
+select
+	sum(GrossSales) GrossSales
+,	sum(GrossRevenue) GrossRevenue
+,	sum(Promocodes) Promocodes
+,	sum(QTYSoldCoupons) QTYCoupons
+,	sum(qtyTransactions) QTYTransactions
+,	case
+		when EventDate = <@campaignDate@> 
+		then 1
+		else 0
+	end IsFirstDay
+,	case
+		when c.UnifiedDiscountId is not null
+		then 1
+		else 0
+	end UnifiedDiscountInEmail
+,	case
+		when LandingPageUrl like '%' + <@c1.campaignName@> + '%'
+		then 1
+		else 0
+	end PurchaseByCampaignEmail
+,	case
+		when LandingPageUrl like '%utm_source=EmailNews%' and SentDate = <@campaignDate@> 
+		then 1
+		else 0
+	end PurchaseByDailyDealEmail
+,	MailingUserTypeId
+into  #CampaignRevenue
+from #tempSales s
+inner join #CampaignUsers ma
+on ma.UserAccountID = s.UserAccountID
+left join #CampaignUnifiedDiscount c
+on c.UnifiedDiscountId = s.UnifiedDiscountId
+group by
+	case
+		when c.UnifiedDiscountId is not null
+		then 1
+		else 0
+	end 
+,	case
+		when  LandingPageUrl like '%' + <@c1.campaignName@> + '%'
+		then 1
+		else 0
+	end
+,	case
+		when LandingPageUrl like '%utm_source=EmailNews%' and SentDate = <@campaignDate@> 
+		then 1
+		else 0
+	end
+,	MailingUserTypeId
+,	case
+		when EventDate = <@campaignDate@> 
+		then 1
+		else 0
+	end;
+set select count(*) qtde from  #campaignRevenue;
+
+print(<@qtde@>);		
+
+select
+	count(distinct
+		case
+			when c.UnifiedDiscountId is not null and MailingUserTypeId = 1
+			then s.UserAccountId
+			else null
+		end
+		) CustomersDealsInEmail
+,	count(distinct
+		case
+			when c.UnifiedDiscountId is not null and LandingPageUrl like '%' + <@c1.campaignName@> + '%' and MailingUserTypeId = 1
+			then s.UserAccountId
+			else null
+		end
+		) CustomersDealsForEmail	
+,	count(distinct
+		case
+			when LandingPageUrl like '%' + <@c1.campaignName@> + '%' and MailingUserTypeId = 1
+			then s.UserAccountId
+			else null
+		end
+		) CustomersPurchaseByEmail
+,	count(distinct
+		case
+			when MailingUserTypeId = 1
+			then s.UserAccountId
+			else null
+		end
+		) QTYCustomersMailing
+,	count(distinct
+		case
+			when MailingUserTypeId = 2
+			then s.UserAccountId
+			else null
+		end
+		) QTYCustomersControl
+,	count(distinct
+		case
+			when LandingPageUrl like '%utm_source=EmailNews%' and MailingUserTypeId = 2
+			then s.UserAccountId
+			else null
+		end
+		) CustomersControlDailyDeal
+into  #CampaignCustomers
+from #tempSales s
+inner join #CampaignUsers ma
+on ma.UserAccountID = s.UserAccountID
+left join #CampaignUnifiedDiscount c
+on c.UnifiedDiscountId = s.UnifiedDiscountId;
+
+set select count(*) qtde from  #CampaignCustomers;
+
+print(<@qtde@>);
+
+
+set select 
+	QTYCustomersMailing / cast(QTYUsersMailing as decimal(18,4)) Adhesion
+,	QTYCustomersControl / cast(QTYUsersControl as decimal(18,4))  AdhesionControl
+,	CustomersDealsForEmail / cast(QTYUsersMailing as decimal(18,4))  AdhesionMailingForEmail
+,	CustomersControlDailyDeal / cast(QTYUsersControl as decimal(18,4))  AdhesionControlForEmail
+,	cast(QTYUsersMailing as int) TotalMailing
+,	cast(QTYUsersControl  as int) TotalControl
+,	(QTYCustomersMailing + cast(QTYCustomersControl as decimal(18,4))) / (QTYUsersMailing + cast(QTYUsersControl as decimal(18,4))) pBarra
+
+from
+(
+select 
+	cast
+	(sum(
+	case 
+		when MailingUserTypeId = 1
+		then 1 
+		else 0
+	end) as decimal(18,2)) QTYUsersMailing
+,	cast
+	(sum(
+	case 
+		when MailingUserTypeId = 2
+		then 1 
+		else 0
+	end) as decimal(18,2)) QTYUsersControl
+from 	#CampaignUsers
+) a,
+(
+select 
+	QTYCustomersMailing
+,	QTYCustomersControl
+,	CustomersDealsForEmail
+,	CustomersControlDailyDeal
+from #CampaignCustomers
+) b;
+
+set select (<@Adhesion@> - <@AdhesionControl@>)/ power((<@pBarra@> * (1 - <@pBarra@>) * (( 1.00 / <@TotalMailing@>) + (1.00 / <@TotalControl@>))) ,0.5) zTest;
+
+
+set select (<@Adhesion@>/<@AdhesionControl@>) - 1 Increase;
+
+
+delete from  reports.CampaignResult
+where CampaignId = <@campaignId@>;
+
+insert into reports.CampaignResult
+select 
+	<@campaignId@> CampaignId
+,	Sents
+,	Opens
+,	Clicks
+,	Spams
+,	Unsubscribes
+,	Bounce
+,	<@Adhesion@> Adhesion 
+,	<@AdhesionControl@> AdhesionControl
+,	<@zTest@> ZTest
+,	case when <@zTest@> > 1.96 then 'diferente' else 'igual' end ZTestResult
+,	QTYCustomersMailing
+,	QTYCustomersControl
+,	GrossSalesMailing
+,	GrossRevenueMailing
+,	PromocodesMailing
+,	CouponsMailing
+,	TransactionsMailing
+,	GrossSalesControl
+,	GrossRevenueControl
+,	PromocodesControl
+,	CouponsControl
+,	TransactionsControl
+,	GrossSalesPurchaseByEmail
+,	GrossRevenuePurchaseByEmail
+,	PromocodesPurchaseByEmail
+,	CouponsPurchaseByEmail
+,	TransactionsPurchaseByEmail
+,	CustomersPurchaseByEmail
+,	GrossSalesDealsInEmail
+,	GrossRevenueDealsInEmail
+,	PromocodesDealsInEmail
+,	CouponsDealsInEmail
+,	TransactionsDealsInEmail
+,	CustomersDealsInEmail
+,	GrossSalesDealsForEmail
+,	GrossRevenueDealsForEmail
+,	PromocodesDealsForEmail
+,	CouponsDealsForEmail
+,	TransactionsDealsForEmail
+,	CustomersDealsForEmail
+,	GrossSalesControlDailyDeal
+,	GrossRevenueControlDailyDeal
+,	PromocodesControlDailyDeal
+,	CouponsControlDailyDeal
+,	TransactionsControlDailyDeal
+,	CustomersControlDailyDeal
+,	<@AdhesionMailingForEmail@>  AdhesionMailingForEmail
+,	<@AdhesionControlForEmail@> AdhesionControlForEmail
+,	Confined
+,	Delivered
+from
+
+#CampaignEmailInfo ei,
+#CampaignCustomers cm,
+(
+select
+	sum(GrossSales) GrossSalesMailing
+,	sum(GrossRevenue) GrossRevenueMailing
+,	sum(Promocodes) PromocodesMailing
+,	sum(QTYCoupons) CouponsMailing
+,	sum(qtyTransactions) TransactionsMailing
+from #CampaignRevenue
+where MailingUserTypeId = 1
+and IsFirstDay = 1
+) m,
+(
+select
+	coalesce(sum(GrossSales),0) GrossSalesControl
+,	coalesce(sum(GrossRevenue),0) GrossRevenueControl
+,	coalesce(sum(Promocodes),0) PromocodesControl
+,	coalesce(sum(QTYCoupons),0) CouponsControl
+,	coalesce(sum(qtyTransactions),0) TransactionsControl
+from #CampaignRevenue
+where MailingUserTypeId = 2
+and IsFirstDay = 1
+) c,
+
+(
+select
+	coalesce(sum(GrossSales),0)  GrossSalesPurchaseByEmail
+,	coalesce(sum(GrossRevenue),0)  GrossRevenuePurchaseByEmail
+,	coalesce(sum(Promocodes),0)  PromocodesPurchaseByEmail
+,	coalesce(sum(QTYCoupons),0)  CouponsPurchaseByEmail
+,	coalesce(sum(qtyTransactions),0)  TransactionsPurchaseByEmail
+from #CampaignRevenue
+where PurchaseByCampaignEmail = 1
+and MailingUserTypeId = 1
+) er,
+(
+select
+	coalesce(sum(GrossSales),0) GrossSalesDealsInEmail
+,	coalesce(sum(GrossRevenue),0) GrossRevenueDealsInEmail
+,	coalesce(sum(Promocodes),0) PromocodesDealsInEmail
+,	coalesce(sum(QTYCoupons),0) CouponsDealsInEmail
+,	coalesce(sum(qtyTransactions),0) TransactionsDealsInEmail
+from #CampaignRevenue
+where UnifiedDiscountInEmail = 1
+and MailingUserTypeId = 1
+) de,
+(
+select
+	coalesce(sum(GrossSales),0) GrossSalesDealsForEmail
+,	coalesce(sum(GrossRevenue),0) GrossRevenueDealsForEmail
+,	coalesce(sum(Promocodes),0) PromocodesDealsForEmail
+,	coalesce(sum(QTYCoupons),0) CouponsDealsForEmail
+,	coalesce(sum(qtyTransactions),0) TransactionsDealsForEmail
+from #CampaignRevenue
+where PurchaseByCampaignEmail = 1
+and UnifiedDiscountInEmail = 1
+and MailingUserTypeId = 1
+) dfe,
+(
+select
+	coalesce(sum(GrossSales),0) GrossSalesControlDailyDeal
+,	coalesce(sum(GrossRevenue),0) GrossRevenueControlDailyDeal
+,	coalesce(sum(Promocodes),0) PromocodesControlDailyDeal
+,	coalesce(sum(QTYCoupons),0) CouponsControlDailyDeal
+,	coalesce(sum(qtyTransactions),0) TransactionsControlDailyDeal
+from #CampaignRevenue
+where MailingUserTypeId = 2
+and PurchaseByDailyDealEmail = 1
+) dd;
+}
+
+;commit

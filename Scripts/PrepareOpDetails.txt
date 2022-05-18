@@ -1,0 +1,148 @@
+drop table if exists #opdetails
+;
+CREATE TABLE #opdetails
+(
+	 c_digo_opcao_n_merico DOUBLE PRECISION   
+	,c_digo_oferta_num_rico DOUBLE PRECISION   
+	,unidade_de_neg_cio VARCHAR(300)   
+	,distrito_conta VARCHAR(300)   
+	,op_cidade_conta VARCHAR(300)   
+	,op_bairro_conta VARCHAR(255)   
+	,condi_o_de_pagamento_oferta VARCHAR(500)   
+	,p_gina_de_publica_o_oferta VARCHAR(500)   
+	,op_id_conta_filial VARCHAR(255)   
+	,op_nome_conta_filial VARCHAR(255)   
+	,id_contrato VARCHAR(500)   
+	,contrato_pu INTEGER   
+	,tipo_site_oferta VARCHAR(500)   
+	,categoria_site_oferta VARCHAR(500)   
+	,subcategoria_site_oferta VARCHAR(500)   
+	,sub_subcategoria_site_oferta VARCHAR(500)   
+	,id_propriet_rio_final VARCHAR(300)   
+	,nome_propriet_rio_final VARCHAR(300)   
+	,id_propriet_rio_guarda_chuva VARCHAR(500)   
+	,nome_propriet_rio_guarda_chuva VARCHAR(500)   
+	,nome_da_opcao_texto VARCHAR(500)   
+	,nome_da_oferta_texto VARCHAR(65535)   
+	,op_t_tulo_da_op_o VARCHAR(65535)   
+	,op_descri_o_da_op_o VARCHAR(65535)   
+	,id_propriet_rio_grow_team VARCHAR(100)   
+	,nome_propriet_rio_grow_team VARCHAR(255)   
+	,projeto VARCHAR(65535)   ENCODE lzo
+	,origem_gteam VARCHAR(65535)   ENCODE lzo
+	,contrato_vinculado_a_adiantamento VARCHAR(65535)   ENCODE lzo
+	,op_quantidade_de_cupons DOUBLE PRECISION   
+)
+DISTSTYLE KEY
+DISTKEY (c_digo_opcao_n_merico)
+SORTKEY (
+	 c_digo_opcao_n_merico
+	)
+;
+insert into #opdetails
+select 
+	op.C_digo_Opcao_N_merico
+,	op.C_digo_Oferta_Num_rico 
+,	case
+		when con.Category in ('Beleza, Estética, Bem Estar e Saúde','Comércio e Serviços Locais','Entret. & Lazer','Gastronomia e Bares') then 'Local'
+		when con.Category = 'Comércio e Serviços Online' then 'E-commerce'
+		when con.Category = 'Viagem e Turismo' and ot.Team = 'Key Account (Turismo)' then 'Turismo - Agências'
+		when con.Category = 'Viagem e Turismo' and ot.Team <> 'Key Account (Turismo)' then 'Turismo - Local'
+		else 'Outros'
+	end	Unidade_de_Neg_cio
+,	Distrito_Conta
+,	OP_Cidade_Conta
+,	OP_Bairro_Conta
+,	Condi_o_de_Pagamento_Oferta
+,	P_gina_de_Publica_o_Oferta
+,	OP_Id_Conta_Filial
+,	OP_Nome_Conta_Filial
+,	Id_Contrato
+,	cast(op.Contrato_PU as int)
+,	Tipo_Site_Oferta
+,	Categoria_Site_Oferta
+,	Subcategoria_Site_Oferta
+,	Sub_Subcategoria_Site_Oferta
+,	case 
+		when ot.team = 'Key Account (E-commerce)' then oft.propriet_rio_compartilhado
+		when acc.apura_o_pelo_contrato = 1 then sCon.propriet_rio_compartilhado
+		else acc.propriet_rio_compartilhado
+	end ID_Propriet_rio_Final
+,	case
+		when ot.team = 'Key Account (E-commerce)' then oft.propriet_rio_compartilhado_texto
+		when acc.apura_o_pelo_contrato = 1 then sCon.propriet_rio_compartilhado_texto
+		else acc.nome_propriet_rio_compartilhado_texto
+	end Nome_Propriet_rio_Final
+,	ID_Propriet_rio_Guarda_Chuva
+,	Nome_Propriet_rio_Guarda_Chuva
+,	op.name as Nome_da_Opcao_texto
+,	Nome_da_Oferta_texto
+,	op.OP_t_tulo_da_op_o 
+,	op.OP_descri_o_da_Op_o 
+,	op.Propriet_rio_Grow_Team
+,	f.name Nome_Propriet_rio_Grow_Team
+,	coalesce(op.projeto, oft.projeto, sCon.projeto) projeto
+,	coalesce(op.origem_gteam, oft.origem_gteam)  origem_gteam
+,	coalesce(op.op_contrato_vinculado_a_adiantamento, oft.of_contrato_vinculado_a_adiantamento, sCon.contrato_vinculado_a_adiantamento) contrato_vinculado_a_adiantamento
+,	op_quantidade_de_cupons
+
+from 
+(
+	select 
+		C_digo_Opcao_N_merico
+	,	C_digo_Oferta_Num_rico 
+	,	Distrito_Conta
+	,	OP_Cidade_Conta
+	,	OP_Bairro_Conta
+	,	Condi_o_de_Pagamento_Oferta
+	,	P_gina_de_Publica_o_Oferta
+	,	OP_Id_Conta_Filial
+	,	OP_Nome_Conta_Filial
+	,	Id_Contrato
+	,	cast(Contrato_PU as int) Contrato_PU
+	,	Tipo_Site_Oferta
+	,	Categoria_Site_Oferta
+	,	Subcategoria_Site_Oferta
+	,	Sub_Subcategoria_Site_Oferta
+	,	ID_Propriet_rio_Final
+	,	Nome_Propriet_rio_Final
+	,	ID_Propriet_rio_Guarda_Chuva
+	,	Nome_Propriet_rio_Guarda_Chuva
+	,	name 
+	,	Nome_da_Oferta_texto
+	,	OP_t_tulo_da_op_o 
+	,	OP_descri_o_da_Op_o 
+	,	Propriet_rio_Grow_Team
+	,	projeto
+	,	origem_gteam
+	,	op_contrato_vinculado_a_adiantamento
+	,	op_quantidade_de_cupons
+	,	coalesce(Nome_Propriet_rio_Final,Nome_Propriet_rio_Guarda_Chuva) "owner"
+	from salesforce.ctOp_es_de_Compra a
+) op	 
+left join REPORTS.OwnerERP  oe on op.owner  = oe.Owner
+left join REPORTS.OwnerTeam ot on oe.OwnerERP = ot.OwnerERP
+inner join reports.Contract con on cast(con.ContractID as int) = cast(op.contrato_pu as int)
+inner join salesforce.ctcontratopu sCon on con.contractid = cast(sCon.Name as int)
+inner join salesforce.cfaccount acc on acc.id = con.accountid
+inner join 
+(
+	select
+		origem_gteam
+	,	of_contrato_vinculado_a_adiantamento
+	,	projeto
+	,	cast(right(name , 10) as int) numericCode
+	,	propriet_rio_compartilhado
+	,	propriet_rio_compartilhado_texto
+	from salesforce.ctOfertas  (nolock) 
+) oft 
+on oft.numericCode = op.C_digo_Oferta_Num_rico 
+left join salesforce.ctcadastro_de_funcion_rios f on f.id = op.Propriet_rio_Grow_Team
+;
+
+
+delete from reports.opdetails
+;
+insert into reports.opdetails 
+select * from #opdetails
+;

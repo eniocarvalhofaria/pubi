@@ -1,0 +1,20 @@
+﻿select
+	EmailAddress Email
+,	UserAccountID
+,	case
+		when rtrim(ltrim(Name))  = '' or Name is null
+		then 'Olá'
+		else Name
+	end Name
+from #MailingSelection
+where
+(
+(UserAccountId + <@RandomNumber@>) % 100 not  between 0 and <@finalMod@>
+and <@CampaignWhere@>
+)
+or <@Semeados@>
+
+
+
+
+

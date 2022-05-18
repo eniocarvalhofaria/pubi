@@ -1,0 +1,31 @@
+﻿IF object_id(N'tempdb..#MailingSelection') IS NOT NULL
+begin
+  drop table #MailingSelection
+end
+;
+IF object_id(N'tempdb..#MailingExclusion') IS NOT NULL
+begin
+  drop table #MailingExclusion
+end
+;
+delete from dbo.MailingUserAccount where CampaignId in (<@CampaignIds@>)
+;
+select distinct UserAccountId 
+into #MailingExclusion
+from dbo.MailingUserAccount where 
+CampaignId in (
+	<@CampaignExclusion@>)
+;
+
+CREATE  INDEX idxExclusionUID on #MailingExclusion(UserAccountId)
+;
+<@QuerySelection@>
+
+
+
+
+
+
+
+
+

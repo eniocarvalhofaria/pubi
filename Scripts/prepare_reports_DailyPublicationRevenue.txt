@@ -1,0 +1,178 @@
+TRUNCATE TABLE reports.DailyPublicationRevenue; COMMIT;
+
+INSERT INTO reports.DailyPublicationRevenue
+select *
+from
+(
+	select 
+		dr.EventDate
+	,	DATE_PART(year,dr.EventDate) EventYear
+	,	DATE_PART(month,dr.EventDate) EventMonth
+	,	date_part(day,dr.EventDate) EventDay
+	,	case when rp.RepresentantName = 'Marcelo Cabreira' then u.UserName else rp.RepresentantName end "Owner"
+	,	
+		case
+			when p.PageName in ('Casa','Email Nacional','Especial Polishop','Esportes e Saúde','Estilo','Relógios') then 'Produtos'
+			when p.PageName in ('Theatro Net São Paulo','São Paulo','Especialmente para vc crm aca') then 'São Paulo - Sul e Oeste'
+			when p.PageName in ('Theatro Net Rio','Especialmente para vc crm aea') then 'Rio de Janeiro'
+			when p.PageName in ('Festas, Brasília') then 'Brasília'
+			else p.PageName
+		end
+		 PageName
+	,	udis.ContractID
+	,	dr.UnifiedDiscountID
+	,	ndis.DiscountName
+	,	acc.AccountID
+	,	acc.AccountName
+	,	case
+			when con.Category in ('Entretenimento','Entretenimento, Cultura e Vida Noturna','Entretenimento, Cultuta e Vida Noturna','Lazer')
+			then 'Entret. & Lazer'
+			else con.Category
+		end  CategoryName
+	,	dis.DiscountedValue
+	,	sum(dr.QTYCoupons) QtyCoupons
+	,	cast(dis.OurCommission as numeric(15,2)) OurCommission
+	,	sum(dr.GrossSales) GrossSales
+	,	sum(dr.GrossSalesPUCommission) GrossSalesPUCommission
+	,	sum(case when mdis.MinEventDate >= '2012-08-01' then dr.CancelledPosBilling else 0 end) CancelledPosBilling
+	,	sum(dr.CancelledPreBilling) CancelledPreBilling
+	,	sum(dr.CancelledPreBillingPU) CancelledPreBillingPU
+	,	sum(dr.NoShow) NoShow
+	,	coalesce(con.DealsClub,0) DealsClub
+	,	con.PaymentCondition
+	,	con.PaymentConditionName
+	,	coalesce(con.Subdivision,'Não tem') Subdivision
+	,	con.Type_Site
+	,	con.Category_Site
+	,	con.SubCategory_Site
+	,	coalesce(con.UseNow,0) UseNow
+	,	con.DealCity
+
+	from 
+	(
+		select *
+		from REPORTS.DiscountRevenue
+		where EventDate between
+		  cast(cast(date_part(year,dateadd(day,-1,GETDATE())) as varchar(4))+'/'+cast(date_part(month,dateadd(day,-1,GETDATE())) as varchar(2))+'/'+'01' as date)
+		  and cast(dateadd(day,-1,GETDATE()) as date)
+		
+		) dr
+	
+	left join ods.Page p
+	on p.PageID = dr.SalesPageID
+	
+	left join ods.City cty
+	on p.CityID = cty.CityID
+	
+	left join ods.Discount dis
+	on dis.DiscountID = dr.DiscountID
+
+	left join ods.UnifiedDiscount udis
+	on dr.UnifiedDiscountID = udis.UnifiedDiscountID
+
+	left join
+	(
+		select
+			dis.UnifiedDiscountID
+		,	min(DiscountName) DiscountName
+
+		from ods.Discount dis
+
+		group by
+			dis.UnifiedDiscountID
+		) ndis
+	on dr.UnifiedDiscountID = ndis.UnifiedDiscountID
+
+
+	left join reports.Contract con
+	on con.ContractId = udis.ContractID
+	
+	left join reports.Account acc
+	on acc.AccountID = con.AccountID
+
+	left join
+	(
+		select
+			dis.UnifiedDiscountID
+		,	min(dis.RepresentantID) RepresentantID
+
+		from ods.Discount dis
+
+		group by
+			dis.UnifiedDiscountID
+		) urp
+	on urp.UnifiedDiscountID = dr.UnifiedDiscountID
+
+	left join ods.Representant rp
+	on rp.RepresentantID = urp.RepresentantID
+
+	left join
+	(
+		select
+			dis.UnifiedDiscountID
+		,	min(dr.EventDate) MinEventDate
+		from reports.DiscountRevenue dr
+		left join ods.Discount dis
+		on dr.DiscountID = dis.DiscountID
+
+		where dr.GrossSales > 0
+		group by
+			dis.UnifiedDiscountID
+		) mdis
+	on mdis.UnifiedDiscountID = dr.UnifiedDiscountID
+	
+	left join reports.User u
+	on con.OwnerId = u.UserID
+
+	left join reports.OwnerERP ownerE
+	on case when rp.RepresentantName = 'Marcelo Cabreira' then u.UserName else rp.RepresentantName end = ownerE.Owner
+
+	where EventDate between
+		  cast(cast(date_part(year,dateadd(day,-1,GETDATE())) as varchar(4))+'/'+ cast(date_part(month,dateadd(day,-1,GETDATE())) as varchar(2))+'/'+'01' as date)
+		  and cast(dateadd(day,-1,GETDATE()) as date)
+
+	group by
+		dr.EventDate
+	,	DATE_PART(year,dr.EventDate)
+	,	DATE_PART(month,dr.EventDate)
+	,	date_part(day,dr.EventDate)
+	,	case when rp.RepresentantName = 'Marcelo Cabreira' then u.UserName else rp.RepresentantName end
+	,	
+		case
+			when p.PageName in ('Casa','Email Nacional','Especial Polishop','Esportes e Saúde','Estilo','Relógios') then 'Produtos'
+			when p.PageName in ('Theatro Net São Paulo','São Paulo','Especialmente para vc crm aca') then 'São Paulo - Sul e Oeste'
+			when p.PageName in ('Theatro Net Rio','Especialmente para vc crm aea') then 'Rio de Janeiro'
+			when p.PageName in ('Festas, Brasília') then 'Brasília'
+			else p.PageName
+		end
+		
+	,	udis.ContractID
+	,	dr.UnifiedDiscountID
+	,	ndis.DiscountName
+	,	acc.AccountID
+	,	acc.AccountName
+	,	case
+			when con.Category in
+	('Entretenimento','Entretenimento, Cultura e Vida Noturna','Entretenimento, Cultuta e Vida Noturna','Lazer')
+			then 'Entret. & Lazer'
+			else con.Category
+		end
+	,	dis.DiscountedValue
+	,	cast(dis.OurCommission as numeric(15,2))
+	,	coalesce(con.DealsClub,0)
+	,	con.PaymentCondition
+	,	con.PaymentConditionName
+	,	coalesce(con.Subdivision,'Não tem')
+	,	con.Type_Site
+	,	con.Category_Site
+	,	con.SubCategory_Site
+	,	coalesce(con.UseNow,0)
+	,	con.DealCity
+	) x
+
+order by
+	EventDate
+,	ContractID
+
+; commit
+

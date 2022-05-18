@@ -1,0 +1,327 @@
+drop table if exists #dailydeals;
+
+
+SELECT 
+ 	'Total'::character varying AS total
+,	x.channelid
+,	"date_part"('year'::character varying::text, x.dateforsale) AS eventyear
+,	CASE
+		WHEN date_diff('month'::character varying::text, x.dateforsale::timestamp without time zone, getdate()) > 3 THEN NULL::integer
+		ELSE "date_part"('day'::character varying::text, x.dateforsale)
+    	END AS eventday
+,	CASE
+        	WHEN "date_part"('day'::character varying::text, x.dateforsale) <= utd.d THEN 1
+        	ELSE 0
+    	END AS uptod
+,	CASE
+		WHEN "date_part"('month'::character varying::text, x.dateforsale) = 1 THEN 'jan'::character varying
+        	WHEN "date_part"('month'::character varying::text, x.dateforsale) = 2 THEN 'fev'::character varying
+        	WHEN "date_part"('month'::character varying::text, x.dateforsale) = 3 THEN 'mar'::character varying
+        	WHEN "date_part"('month'::character varying::text, x.dateforsale) = 4 THEN 'abr'::character varying
+        	WHEN "date_part"('month'::character varying::text, x.dateforsale) = 5 THEN 'mai'::character varying
+        	WHEN "date_part"('month'::character varying::text, x.dateforsale) = 6 THEN 'jun'::character varying
+        	WHEN "date_part"('month'::character varying::text, x.dateforsale) = 7 THEN 'jul'::character varying
+        	WHEN "date_part"('month'::character varying::text, x.dateforsale) = 8 THEN 'ago'::character varying
+        	WHEN "date_part"('month'::character varying::text, x.dateforsale) = 9 THEN 'set'::character varying
+        	WHEN "date_part"('month'::character varying::text, x.dateforsale) = 10 THEN 'out'::character varying
+        	WHEN "date_part"('month'::character varying::text, x.dateforsale) = 11 THEN 'nov'::character varying
+        	WHEN "date_part"('month'::character varying::text, x.dateforsale) = 12 THEN 'dez'::character varying
+        	ELSE NULL::character varying
+	END AS eventmonthtxt
+,	ct.categoryname
+,	cy.cityname
+,	cy.isactive AS cityisactive
+,	cy.istop AS cityistop
+,	st.statename
+,	x.marketingdeal
+,	COALESCE(x.assuredpercentage, 1::numeric::numeric(18,0)) AS assuredpercentage
+,	CASE
+		WHEN x.assuredpercentage = 1::numeric::numeric(18,0)::numeric(2,1) OR x.assuredpercentage IS NULL THEN 1
+		ELSE 0
+	END AS paymentsoldcoupons
+,	CASE
+		WHEN date_diff('day'::character varying::text, x.dateforsale::timestamp without time zone, getdate()::date::timestamp without time zone) > 3 THEN 0
+        	ELSE 1
+    	END AS putemailbody
+,	COALESCE(co.dealsclub::integer, 0) AS dealsclub
+,	COALESCE(co.usenow, 0) AS usenow
+,	sum(x.newdiscount) AS newdiscount
+,	sum(x.newcontract) AS newcontract, sum(x.value) AS value
+,	sum(x.qty) AS qtydiscounts, sum(x.duration) AS sumduration
+,	sum(x.durationdiscountclosed) AS sumdurationclosed
+,	sum(x.discountclosed) AS discountclosed
+,	sum(x.discountoffline) AS discountoffline
+,	sum(x.discountlive) AS discountlive
+into	#dailydeals
+FROM 
+	( 
+	SELECT 
+		dr.channelid
+	,	dc.categoryid
+	,	dr.dateforsale
+	,	COALESCE(so.salespageid, dr.pageid) AS pageid
+	,	dr.unifieddiscountid
+	,	pc.assuredpercentage
+	,	CASE
+			WHEN so.discountvalue <= 1::numeric::numeric(18,0) THEN 1
+			ELSE 0
+		END AS marketingdeal
+    	,	sum(
+        		CASE
+				WHEN nc.unifieddiscountid IS NOT NULL AND dr.newdiscount = 1 THEN 1
+				ELSE 0
+			END
+            	) AS newcontract
+	,	sum(dr.newdiscount) AS newdiscount
+	,	0 AS value
+	,	sum(dr.qty) AS qty
+	,	sum(dr.duration) AS duration
+	,	sum(dr.durationdiscountclosed) AS durationdiscountclosed
+	,	sum(dr.discountclosed) AS discountclosed
+	,	sum(dr.discountoffline) AS discountoffline
+	,	sum(dr.discountlive) AS discountlive
+    	FROM 
+    	(
+    		SELECT 
+    			ud.unifieddiscountid
+    		,	ud.dateforsale
+    		,	CASE
+        	    	WHEN ud.isfirstdate = 1 THEN 1
+        	        ELSE 0
+        	    END AS newdiscount
+        	,	CASE
+        	        WHEN ud.islastdate = 1 THEN 1
+        	        ELSE 0
+        	    END AS discountclosed
+        	,	1 AS channelid
+        	,	1 AS qty
+        	,	0 AS duration
+        	,	0 AS durationdiscountclosed
+        	,	0 AS discountoffline
+        	,	0 AS discountlive
+        	,	max(ud.pageid) AS pageid
+        	FROM reports.unifieddiscountscheduling ud
+		WHERE ud.ispudeal = 1
+        	GROUP BY 1,2,3,4
+        	UNION ALL 
+     		SELECT 
+    			ud.unifieddiscountid
+    		,	ud.dateforsale
+    		,	CASE
+        	    	WHEN ud.isfirstdate = 1 THEN 1
+        	        ELSE 0
+        	    END AS newdiscount
+        	,	CASE
+        	        WHEN ud.islastdate = 1 THEN 1
+        	        ELSE 0
+        	    END AS discountclosed
+        	,	6 AS channelid
+        	,	1 AS qty
+        	,	0 AS duration
+        	,	0 AS durationdiscountclosed
+        	,	0 AS discountoffline
+        	,	0 AS discountlive
+        	,	max(ud.pageid) AS pageid
+        	FROM reports.unifieddiscountscheduling ud
+		WHERE ud.isgroupondeal = 1
+        	GROUP BY 1,2,3,4
+        	) dr
+	LEFT JOIN 
+		( 
+		SELECT 
+			sa.unifieddiscountid
+		,	sa.salespageid
+		,	sa.discountvalue
+        	FROM 
+        		( 
+        		SELECT 
+        			derived_table1.unifieddiscountid
+        		,	derived_table1.salespageid
+        		,	derived_table1.discountvalue
+        		,	rank()	OVER(PARTITION BY derived_table1.unifieddiscountid  ORDER BY derived_table1.grosssales DESC
+        		,	derived_table1.salespageid) AS sortorder
+        	    	FROM 
+        		    	( 
+            			SELECT 
+            				unifieddiscountid
+            			,	salespageid
+            			,	sum(grosssales) AS grosssales
+            			,	sum(grosssales) / 
+            				sum(
+                		    	CASE
+                			     	WHEN qtycoupons > 0 THEN qtycoupons
+                		        	ELSE NULL::bigint
+                		        END
+                        	)::numeric::numeric(18,0) AS discountvalue
+                		FROM reports.discountrevenue
+                	GROUP BY 1,2
+                
+                	) derived_table1
+		) sa
+            	WHERE sa.sortorder = 1
+	) so ON so.unifieddiscountid = dr.unifieddiscountid
+	LEFT JOIN reports.unifieddiscountcategory dc ON dr.unifieddiscountid = dc.unifieddiscountid
+	LEFT JOIN ods.unifieddiscount u ON dr.unifieddiscountid = u.unifieddiscountid
+	LEFT JOIN 
+		( 
+		SELECT 
+			unifieddiscount.contractid
+		,	min(unifieddiscount.unifieddiscountid) AS unifieddiscountid
+		FROM ods.unifieddiscount
+   		GROUP BY 1
+		) nc 
+	ON u.unifieddiscountid = nc.unifieddiscountid
+   	LEFT JOIN reports.paymentcondition pc ON u.paymentcondition::text = pc.paymentcondition::text
+  	GROUP BY 1,2,3,4,5,6,7
+	) x
+LEFT JOIN reports.category ct ON x.categoryid = ct.categoryid
+LEFT JOIN reports.page pg ON x.pageid = pg.pageid
+LEFT JOIN reports.city cy ON cy.cityid = pg.cityid
+left join ods.state st on cy.stateid = st.stateid
+LEFT JOIN ods.unifieddiscount ud ON x.unifieddiscountid = ud.unifieddiscountid
+LEFT JOIN reports.contract co ON co.contractid = ud.contractid
+INNER JOIN 
+	( 
+	SELECT 
+		"date_part"('day'::character varying::text
+	,	"max"(discountrevenue.eventdate)) AS d
+	FROM reports.discountrevenue
+	) utd ON 1 = 1
+WHERE x.dateforsale < getdate()::date
+GROUP BY 2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17
+;
+drop table if exists #dailyevents; 
+	
+	
+SELECT
+	'T' AS total,
+	COALESCE(a.eventyear,b.eventyear::double precision) AS eventyear,
+	COALESCE(a.eventday,b.eventday::double precision) AS eventday,
+	COALESCE(a.eventmonthtxt,b.eventmonthtxt) AS eventmonthtxt,
+	COALESCE(a.categoryname,b.categoryname) AS categoryname,
+	COALESCE(a.cityname,b.cityname) AS cityname,
+	COALESCE(a.cityisactive,b.cityisactive) AS cityisactive,
+	COALESCE(a.cityistop,b.cityistop) AS cityistop,
+	COALESCE(a.marketingdeal,b.marketingdeal) AS marketingdeal,
+	COALESCE(a.putemailbody,b.putemailbody) AS putemailbody,
+	rtrim(ltrim(( COALESCE( a.assuredpercentage, b.assuredpercentage )* 100::numeric::numeric( 18, 0 ))::integer::character varying( 10 )::text ))+ '%'::character varying::text AS assuredpercentage,
+	CASE
+		WHEN COALESCE(a.paymentsoldcoupons,	b.paymentsoldcoupons)= 1 THEN 'Cupom vendido'::character varying
+		WHEN COALESCE(a.paymentsoldcoupons,	b.paymentsoldcoupons)= 2 THEN 'Compra de cupom antecipada'::character varying
+		ELSE 'Cupom utilizado'::character varying
+	END AS ispaymentsoldcoupons,
+	COALESCE(a.dealsclub,b.dealsclub) AS dealsclub,
+	COALESCE(a.usenow,b.usenow) AS usenow,
+	sum( COALESCE( a.grosssales, 0::numeric::numeric( 18, 0 ))) AS grosssales,
+	sum( COALESCE( a.financecharge, 0::numeric::numeric( 18, 0 ))) AS financecharge,
+	sum( COALESCE( a.grosssalespucommission, 0::numeric::numeric( 18, 0 ))) AS grosssalespucommission,
+	sum( COALESCE( a.grossrevenue, 0::numeric::numeric( 18, 0 ))) AS grossrevenue,
+	sum( COALESCE( a.promocodes, 0::numeric::numeric( 18, 0 ))) AS promocodes,
+	sum( COALESCE( a.qtycoupons, 0::bigint )) AS qtycoupons,
+	sum( COALESCE( a.qtytransactions, 0::bigint )) AS qtytransactions,
+	sum( COALESCE( a.cancelledprebillingpu, 0::numeric::numeric( 18, 0 ))) AS cancelledprebillingpu,
+	sum( COALESCE( a.cancelledprebilling, 0::numeric::numeric( 18, 0 ))) AS cancelledprebilling,
+	sum( COALESCE( a.cancelledposbilling, 0::numeric::numeric( 18, 0 ))) AS cancelledposbilling,
+	sum( COALESCE( a.credits, 0::numeric::numeric( 18, 0 ))) AS credits,
+	sum( COALESCE( a.lossesaccrual, 0::numeric::numeric( 18, 0 ))) AS lossesaccrual,
+	sum( COALESCE( a.visits, 0::bigint )) AS visits,
+	sum( COALESCE( b.newdiscount, 0::bigint )) AS newdiscount,
+	sum( COALESCE( b.value::numeric::numeric( 18, 0 ), 0::numeric::numeric( 18, 0 ))) AS value,
+	sum( COALESCE( b.qtydiscounts, 0::bigint )) AS qtydiscounts,
+	sum( COALESCE( b.sumduration, 0::bigint )) AS sumduration,
+	sum( COALESCE( b.sumdurationclosed, 0::bigint )) AS sumdurationclosed,
+	sum( COALESCE( b.discountclosed, 0::bigint )) AS discountclosed,
+	sum( COALESCE( b.newcontract, 0::bigint )) AS newcontract,
+	sum( COALESCE( b.discountlive, 0::bigint )) AS discountlive,
+	sum( COALESCE( a.noshow, 0::numeric::numeric( 18, 0 ))) AS noshow,
+	sum( COALESCE( a.qtycouponcancelledprebilling, 0::bigint )) AS qtycouponcancelledprebilling,
+	sum( COALESCE( a.qtycouponcancelledposbilling, 0::bigint )) AS qtycouponcancelledposbilling,
+	sum( COALESCE( a.cancelledposbillingpu, 0::bigint::numeric )) AS cancelledposbillingpu,
+	sum( COALESCE( a.cancelledTotal,0)) cancelledTotal,
+	sum( COALESCE( a.extrafees, 0::bigint::numeric )) AS extrafees,
+	sum( COALESCE( a.extrafeespu, 0::bigint::numeric )) AS extrafeespu,
+	sum( COALESCE( a.timetopayeconomy,0)) timetopayeconomy,
+	sum( COALESCE( a.anticipationcost,0)) anticipationcost,
+	sum( COALESCE( a.antifraudfee,0)) antifraudfee,
+	sum( COALESCE( a.aquirerfee,0)) aquirerfee,
+	sum( COALESCE( a.cancellationextrafees,0)) cancellationextrafees,
+	sum( COALESCE( a.cancellationextrafeespu,0)) cancellationextrafeespu,
+	sum( COALESCE( a.cancellationpromocodes,0)) cancellationpromocodes,
+	sum( COALESCE( a.cancellationfinancecharge,0)) cancellationfinancecharge,
+	sum(taxes) taxes,
+	sum( COALESCE( a.chargeback,0)) chargeback,
+	sum(COALESCE( a.administrativefee,0)) administrativefee,
+	sum(COALESCE( a.administrativefeecancelled,0)) administrativefeecancelled,
+	case 
+		when coalesce(a.channelid,b.channelid) = 1 then 'Peixe Urbano' 
+			when coalesce(a.channelid,b.channelid) = 6 then 'Groupon' 
+		end Site,
+	coalesce(a.statename,b.statename) statename
+	
+into #dailyevents
+FROM reports.dashboarddailysales a FULL
+JOIN #dailydeals b ON
+	a.eventyear = b.eventyear::double precision
+	AND a.eventday = b.eventday::double precision
+	AND a.uptod = b.uptod
+	AND a.eventmonthtxt::text = b.eventmonthtxt::text
+	AND a.categoryname::text = b.categoryname::text
+	AND a.cityname::text = b.cityname::text
+	AND a.cityisactive = b.cityisactive
+	AND a.cityistop = b.cityistop
+	AND a.marketingdeal = b.marketingdeal
+	AND a.assuredpercentage = b.assuredpercentage
+	AND a.dealsclub = b.dealsclub
+	AND a.usenow = b.usenow
+	AND a.paymentsoldcoupons = b.paymentsoldcoupons
+	AND a.channelid = b.channelid
+GROUP BY 1,2,3,4,5,6,7,8,9,10,11,12,13,14, 
+case 
+		when coalesce(a.channelid,b.channelid) = 1 then 'Peixe Urbano' 
+			when coalesce(a.channelid,b.channelid) = 6 then 'Groupon' 
+		end
+,	coalesce(a.statename,b.statename)
+having 
+	sum( COALESCE( a.grosssales, 0::numeric::numeric( 18, 0 ))) > 0 or
+	sum( COALESCE( a.financecharge, 0::numeric::numeric( 18, 0 ))) > 0 or
+	sum( COALESCE( a.grosssalespucommission, 0::numeric::numeric( 18, 0 ))) > 0 or
+	sum( COALESCE( a.grossrevenue, 0::numeric::numeric( 18, 0 ))) > 0 or
+	sum( COALESCE( a.promocodes, 0::numeric::numeric( 18, 0 ))) > 0 or
+	sum( COALESCE( a.qtycoupons, 0::bigint )) > 0 or
+	sum( COALESCE( a.qtytransactions, 0::bigint )) > 0 or
+	sum( COALESCE( a.cancelledprebillingpu, 0::numeric::numeric( 18, 0 ))) > 0 or
+	sum( COALESCE( a.cancelledprebilling, 0::numeric::numeric( 18, 0 ))) > 0 or
+	sum( COALESCE( a.cancelledposbilling, 0::numeric::numeric( 18, 0 ))) > 0 or
+	sum( COALESCE( a.credits, 0::numeric::numeric( 18, 0 ))) > 0 or
+	sum( COALESCE( a.lossesaccrual, 0::numeric::numeric( 18, 0 ))) > 0 or
+	sum( COALESCE( a.visits, 0::bigint )) > 0 or
+	sum( COALESCE( b.newdiscount, 0::bigint )) > 0 or
+	sum( COALESCE( b.value::numeric::numeric( 18, 0 ), 0::numeric::numeric( 18, 0 ))) > 0 or
+	sum( COALESCE( b.qtydiscounts, 0::bigint )) > 0 or
+	sum( COALESCE( b.sumduration, 0::bigint )) > 0 or
+	sum( COALESCE( b.sumdurationclosed, 0::bigint )) > 0 or
+	sum( COALESCE( b.discountclosed, 0::bigint )) > 0 or
+	sum( COALESCE( b.newcontract, 0::bigint )) > 0 or
+	sum( COALESCE( b.discountlive, 0::bigint )) > 0 or
+	sum( COALESCE( a.noshow, 0::numeric::numeric( 18, 0 ))) > 0 or
+	sum( COALESCE( a.qtycouponcancelledprebilling, 0::bigint )) > 0 or
+	sum( COALESCE( a.qtycouponcancelledposbilling, 0::bigint )) > 0 or
+	sum( COALESCE( a.cancelledposbillingpu, 0::bigint::numeric )) > 0 or
+	sum( COALESCE( a.extrafees, 0::bigint::numeric )) > 0 or
+	sum( COALESCE( a.extrafeespu, 0::bigint::numeric )) > 0 or
+	sum( COALESCE( a.timetopayeconomy,0)) > 0 or
+	sum( COALESCE( a.anticipationcost,0)) > 0 or
+	sum( COALESCE( a.antifraudfee,0)) > 0 or
+	sum( COALESCE( a.aquirerfee,0)) > 0 or
+	sum( COALESCE( a.cancellationextrafees,0)) > 0 or
+	sum( COALESCE( a.cancellationextrafeespu,0)) > 0 or
+	sum( COALESCE( a.cancellationpromocodes,0)) > 0
+
+;
+	
+delete from reports.dailyevents ;
+
+
+insert into reports.dailyevents 
+select  *  from  #dailyevents
+;

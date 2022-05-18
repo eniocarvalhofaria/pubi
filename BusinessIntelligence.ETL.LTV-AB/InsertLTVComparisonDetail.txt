@@ -1,0 +1,26 @@
+﻿
+delete from reports.ltvcomparisonDeteail where testName = '<@testname@>';
+
+insert into reports.ltvcomparisonDeteail
+		select
+			u.userAccountId
+		,	p.purchaseId
+		,	u.userAccountPurchaseOrder userAccountPurchaseOrderRef
+		,	p.PurchaseOrder  userAccountPurchaseOrder
+		,	u.userAccountPurchaseClass
+		,	u.userTypeName
+		,	u.testName
+		,	u.yearMonth
+		,	u.isUserAccountUnified	
+		,	datediff(month,u.EventDate,p.EventDate) "month"
+		,	sum(GrossSales) GrossSales
+		,	sum(GrossRevenue) GrossRevenue
+		,	sum(GrossRevenueMinusPromocode) GrossRevenueMinusPromocode
+		,	sum(NetRevenue) NetRevenue
+		,	sum(NetRevenueMinusPromocode) NetRevenueMinusPromocode
+		from #ltvUsersAnalysis u
+		inner join reports.PurchaseOrder p
+		on 	u.useraccountid = p.userAccountId
+		and	u.isUserAccountUnified = p.isUserAccountUnified
+		and u.userAccountPurchaseOrder <= p.PurchaseOrder
+		group by 1,2,3,4,5,6,7,8,9,10

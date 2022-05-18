@@ -1,0 +1,96 @@
+connection PROCESSCONTROL
+
+set
+select max(cast(LastDateTimeAvailable as date)) LastDate 
+from  REPORTS.dbo.ExecutionControl nolock
+where processname like '%UnifiedDiscountScheduling%'
+and ReturnCode = 0
+;
+
+
+
+
+;
+select distinct
+	dateforsale
+,	y.pageid
+,	UnifiedDiscountId
+,	case when startdate = dateforsale then 1 else 0 end isFirstDate
+,	case when enddate = dateforsale then 1 else 0 end isLastDate
+,	startdate
+,	enddate
+,	accountid
+,	IsPUDeal
+,	IsGrouponDeal
+into #unifiedDiscountScheduling
+from
+(
+select distinct
+	c.date dateforsale
+,	ps.page
+,	legacydata_unified_discount_id UnifiedDiscountId
+,	cast(dl.publishing_date as date) startdate
+,	case when dl.expiration_date < '2000-01-01' then cast('2100-12-31' as date) else cast(dl.expiration_date  as date) end enddate
+,	account_account_id accountid
+,	case when dl.enabled_domains ilike '%PU%' then 1 else 0 end IsPUDeal
+,	case when dl.enabled_domains ilike '%GROUPON%' then 1 else 0 end IsGrouponDeal
+
+from reports.currentcalendar c
+inner join ods.mng_deals_latest dl
+on c.date between dl.publishing_date and expiration_date
+left join ods.mng_permanent_scheduling_deals psd
+on psd.deal_numeric_id = dl.deal_numeric_id
+left join (select distinct * from  ods.mng_permanent_scheduling) ps
+on ps.numeric_id = psd.numeric_id
+where 
+	c.date between dateadd(day,-1,cast(<@LastDate@> as date)) and  dateadd(day,-1,cast(getdate() as date))
+and legacydata_unified_discount_id > 0
+
+union all
+
+select distinct
+	c.date dateforsale
+,	sld.page
+,	legacydata_unified_discount_id UnifiedDiscountId
+,	cast(dl.publishing_date as date) startdate
+,	case when dl.expiration_date < '2000-01-01' then cast('2100-12-31' as date) else cast(dl.expiration_date  as date) end enddate
+,	account_account_id accountid
+,	case when dl.enabled_domains ilike '%PU%' then 1 else 0 end IsPUDeal
+,	case when dl.enabled_domains ilike '%GROUPON%' then 1 else 0 end IsGrouponDeal
+
+from reports.currentcalendar c
+inner join ods.mng_schedulings_latest_deals sld
+on  cast(sld."date" as date)  = c."date"
+inner join ods.mng_deals_latest dl
+on sld.deal_numeric_id = dl.deal_numeric_id
+where 
+	c.date between dateadd(day,-1,cast(<@LastDate@> as date)) and  dateadd(day,-1,cast(getdate() as date))
+and legacydata_unified_discount_id > 0
+
+) x
+inner join
+(
+select distinct
+	pageid page
+,	legacyregionid pageid
+from ods.mng_pages_latest
+) y
+on x.page = y.page
+;
+set
+select count(1) RowCount from #unifiedDiscountScheduling
+;
+
+if(<@RowCount@> > 0 ) --previne dados processados vazios
+{
+	delete from reports.unifiedDiscountScheduling
+	where dateforsale between dateadd(day,-1,cast(<@LastDate@> as date)) and  dateadd(day,-1,cast(getdate() as date))
+;
+	insert into reports.unifiedDiscountScheduling
+	select *  from #unifiedDiscountScheduling;
+}else
+{
+
+return(5); --se fonte de dados estiver vazia lança um erro para o Visual Cron
+
+}

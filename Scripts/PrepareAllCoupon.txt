@@ -1,0 +1,409 @@
+drop table if exists rcb;
+create temporary table rcb (
+	PurchaseID int,
+	CuponID int,
+	ChargeBackRefundTypeID int
+)
+distkey(PurchaseID)
+sortkey(PurchaseID);
+
+insert into rcb
+select 	rcb.PurchaseID, 
+		rcbc.CuponID, 
+		max(ChargeBackRefundTypeID) ChargeBackRefundTypeID
+from ods.RefundChargeBack	rcb  (NOLOCK) 
+join stage.RefundChargeback_Cupon rcbc (NOLOCK) 
+	on rcb.RefundChargeBackID = rcbc.RefundChargeBackID
+ group by 1,2;
+	 
+analyze rcb;
+------------------
+	 
+drop table if exists auxcoupon;
+create temporary table auxcoupon (
+	cuponid int, 
+	purchaseid int,
+	code varchar(50),
+	fufillmentdate date,
+	CancelDate date,
+	DiscountId int,
+	PurchaseLineItemID int,
+	BuyerUserAccountID int,
+	RegisteringEmployeeUserAccountID int,
+	BuyingOptionId varchar(50),
+	ValidationMethod varchar(50),
+	Status varchar(50),
+	Marca varchar(20)
+)
+distkey(DiscountId)
+sortkey(DiscountId, PurchaseID, PurchaseLineItemID, BuyerUserAccountID);
+
+insert into auxcoupon
+select 	c.cuponid, 
+		c.purchaseid,
+		c.code,
+		c.fufillmentdate,
+		c.CancelDate,
+		c.DiscountId,
+		c.PurchaseLineItemID,
+		c.BuyerUserAccountID,
+		c.RegisteringEmployeeUserAccountID,
+		c.BuyingOptionId,
+		CASE
+			WHEN c.RedeemerKey IS NULL AND c.fufillmentdate is not null THEN 'Portal de Parceiros'
+			WHEN c.RedeemerKey = 6 THEN 'App Android'
+			WHEN c.RedeemerKey = 8 THEN 'App iOS'
+			WHEN c.RedeemerKey = 27 THEN 'App Parceiro Android'
+        END as ValidationMethod,
+        CASE 
+			WHEN c.couponstatusid = 1 and c.fufillmentdate is not null THEN 'Usado'
+			WHEN c.couponstatusid = 2 and c.fufillmentdate is not null THEN 'Usado e Cancelado'
+			WHEN c.couponstatusid = 1 and c.fufillmentdate is null  and  c.DateExpires < getdate() then 'Vencido'
+			WHEN c.couponstatusid = 1 and c.fufillmentdate is null and  c.DateExpires >= getdate() then 'Valido'
+			WHEN c.couponstatusid = 4 then 'Em disputa'
+			ELSE 'Cancelado'
+        END as Status,
+		case 
+			when p.sourceid in (1,2,3) then 'Peixe Urbano'
+			when p.sourceid in (4,5,6) then 'Groupon'
+	    end "Marca"
+from ods.cupon c (nolock)
+	inner join ods.purchase p (nolock) on p.purchaseid = c.purchaseid
+where 1=1
+and c.creationdate >= cast(cast(date_part('year', dateadd(month, -6,getdate())) as varchar) + '-' + right('00' + cast(date_part('month', dateadd(month, -6,getdate())) as varchar), 2) + '-01' as date)
+--and c.FufillmentDate <= getdate();
+--and c.discountid in (select discountid from auxdiscount)
+;
+
+
+analyze auxcoupon;
+-------------------------
+
+drop table if exists auxdiscount;
+create temporary table auxdiscount (
+	DiscountId int,
+	companyname varchar(256),
+	DateExpires date,
+	UnifiedDiscountID int,
+	SmallImageUrl varchar(256),
+	discountdescription varchar(256),
+	TransferValue decimal(12,2)
+)
+distkey(DiscountId)
+sortkey(DiscountId);
+
+insert into auxdiscount
+select	d.DiscountId,
+		d.companyname,
+		d.DateExpires,
+		d.UnifiedDiscountID,
+		d.SmallImageUrl,
+		d.discountdescription,
+		d.DiscountedValue * (1 - d.OurCommission) as TransferValue
+from ods.discount d
+where 1=1
+--and d.companyname = 'Continental eShop'
+and d.discountid in (select discountid from auxcoupon);
+
+analyze auxdiscount;
+-----------------------------------------
+
+drop table if exists auxpurchaselineitem2;
+create temporary table auxpurchaselineitem2 (
+	PurchaseLineItemID int,
+	RateValue decimal(12,2)
+)
+distkey(PurchaseLineItemID)
+sortkey(PurchaseLineItemID);
+
+insert into auxpurchaselineitem2
+select 
+		pli.PurchaseLineItemID,
+		((pli.ShippingValue * (1 - pli.ShippingCommission)) + (pli.IssuingAndBoardingValue * (1 - pli.IssuingAndBoardingCommission)) + (pli.OperationalCostValue * (1 - pli.OperationalCostCommission))) as RateValue	
+from ods.PurchaseLineItem pli
+where 1=1
+and pli.PurchaseLineItemID in (select PurchaseLineItemID from auxcoupon);
+
+analyze auxpurchaselineitem2;
+----------------------------------------------
+
+drop table if exists auxpurchase;
+create temporary table auxpurchase (
+	PurchaseID int,
+	PurchaseInitiated date,
+	PurchaseStatusID int,
+    Quantity int,
+	RateValue decimal(12,2),
+	CuponID int
+)
+distkey(PurchaseID)
+sortkey(PurchaseID, CuponID);
+
+insert into auxpurchase
+select 	p.PurchaseID,
+		p.PurchaseInitiated,
+		p.PurchaseStatusID,
+        p.Quantity,
+        pli.RateValue,
+        c.CuponID
+from auxcoupon c 
+join ods.Purchase p
+	on p.purchaseid = c.purchaseid
+--join ods.Cupon c2
+--	on c2.cuponid = c.cuponid
+join auxpurchaselineitem2 pli
+	on pli.PurchaseLineItemID = c.PurchaseLineItemID
+where 1=1
+and p.PurchaseInitiated >= cast(cast(date_part('year', dateadd(month, -6,getdate())) as varchar) + '-' + right('00' + cast(date_part('month', dateadd(month, -6,getdate())) as varchar), 2) + '-01' as date)
+--and c.FufillmentDate <= getdate()
+;
+--and p.purchaseid = 46439718;
+
+analyze auxpurchase;
+----------------------------------------
+
+drop table if exists auxuseraccount2;
+create temporary table auxuseraccount2 (
+	UserAccountID int,
+	Name varchar(256),
+	EmailAddress varchar(256),
+	ValidationName varchar(256)
+)
+distkey(UserAccountID)
+sortkey(UserAccountID);
+
+insert into auxuseraccount2
+select	u.UserAccountID,
+		u.Name,
+		u.EmailAddress,
+		cast(u.EmailAddress as varchar(256)) as ValidationName
+from ods.UserAccount u
+where 1=1
+and u.UserAccountID in (select BuyerUserAccountID from auxcoupon);
+
+analyze auxuseraccount2;
+------------------------------------------------
+
+drop table if exists coupon;
+create temporary table coupon (
+	cuponid int, 
+	purchaseid int,
+	code varchar(50),
+	fufillmentdate date,
+	CancelDate date,
+	DiscountId int,
+	PurchaseLineItemID int,
+	BuyerUserAccountID int,
+	RegisteringEmployeeUserAccountID int,
+	BuyingOptionId varchar(50),
+	companyname varchar(256),
+	DateExpires date,
+	UnifiedDiscountID int,
+	SmallImageUrl varchar(256),
+	discountdescription varchar(256),
+	ValidationMethod varchar(50),
+	Status varchar(50),
+	PurchaseInitiated date,
+    PurchaseStatusID int,
+    Quantity int,
+    TransferValue decimal(12,2),
+    RateValue decimal(12,2),
+    TotalTransferValue decimal(12,2),
+    Name varchar(256),
+	EmailAddress varchar(256),
+	ValidationName varchar(256),
+	Marca varchar(20)
+)
+distkey(cuponid)
+sortkey(cuponid, RegisteringEmployeeUserAccountID, BuyingOptionId, PurchaseID);
+
+insert into coupon
+select 	c.cuponid, 
+		c.purchaseid,
+		c.code,
+		c.fufillmentdate,
+		c.CancelDate,
+		c.DiscountId,
+		c.PurchaseLineItemID,
+		c.BuyerUserAccountID,
+		c.RegisteringEmployeeUserAccountID,
+		c.BuyingOptionId,
+		d.companyname,
+		d.DateExpires,
+		d.UnifiedDiscountID,
+		d.SmallImageUrl,
+		d.discountdescription,
+		c.ValidationMethod,
+        c.Status,
+        --p.PurchaseInitiated,
+        --p.PurchaseStatusID,
+        --p.Quantity,
+        pli.PurchaseInitiated,
+        pli.PurchaseStatusID,
+        pli.Quantity,
+        d.TransferValue,
+        pli.RateValue,
+		--(pli.ShippingValue * (1 - pli.ShippingCommission)) + (pli.IssuingAndBoardingValue * (1 - pli.IssuingAndBoardingCommission)) + (pli.OperationalCostValue * (1 - pli.OperationalCostCommission)) as RateValue,
+		d.TransferValue + pli.RateValue as TotalTransferValue,
+		u.Name as UserName,
+		u.EmailAddress as UserEmail,
+		u.ValidationName,
+		c.Marca
+		from auxcoupon c 
+		join auxdiscount d 
+			on d.discountid = c.discountid
+		join auxpurchase pli
+			on pli.CuponID = c.CuponID
+		join auxuseraccount2 u 
+			on U.UserAccountID = c.BuyerUserAccountID;
+
+analyze coupon;		
+---------------------------------------------	
+
+drop table if exists auxpaymentantifraud;
+create temporary table auxpaymentantifraud (
+	PurchasePaymentDataID int,
+	LastStatusID int
+)
+distkey(PurchasePaymentDataID)
+sortkey(PurchasePaymentDataID);
+
+insert into auxpaymentantifraud
+select	ppo.PurchasePaymentDataID,
+		paf.LastStatusID
+from ods.PaymentAntifraud paf
+LEFT JOIN ods.PurchasePaymentData ppo
+	ON ppo.PurchasePaymentDataID = paf.PurchasePaymentDataID 
+	and paf.PaymentAntiFraudClassID in (2,3)
+where 1=1
+and ppo.PurchasePaymentDataID in (select PurchaseID from coupon);
+
+analyze auxpaymentantifraud;
+---------------------------------------------
+
+drop table if exists auxUnifiedDiscountBuyingOption2;
+create temporary table auxUnifiedDiscountBuyingOption2 (
+	Title varchar(256),
+	Description varchar(256),
+	BuyingOptionId varchar(50),
+	UnifiedDiscountId int	
+)
+distkey(BuyingOptionId)
+sortkey(BuyingOptionId, UnifiedDiscountId);
+
+insert into auxUnifiedDiscountBuyingOption2
+select	replace(o.Title,'"','') Title,
+		replace(o.Description,'"','') Description,
+		replace(o.BuyingOptionId,'"','') BuyingOptionId,
+		o.UnifiedDiscountId		
+from stage.UnifiedDiscountBuyingOption o
+where 1=1
+and replace(o.BuyingOptionId,'"','') in (select distinct replace(BuyingOptionId,'"','') BuyingOptionId from coupon);
+
+analyze auxUnifiedDiscountBuyingOption2;
+---------------------------------------------
+
+/*drop table if exists AllCoupon;
+create table reports.AllCoupon (
+	PurchaseDate date, 
+	ValidationDate date, 
+	ValidationName varchar(256),
+	ValidationMethod varchar(50),
+	TransferValue decimal(12,2),
+	RateValue decimal(12,2),
+	TotalTransferValue decimal(12,2),
+	Coupon varchar(50),
+	CancelDate date,
+	CancelType varchar(50),
+	Status varchar(50),
+	Quantity int,
+	UserName varchar(100),
+	UserEmail varchar(100),
+	DealId int,
+	DealImage varchar(256),
+	DealName varchar(256),
+	OptionName varchar(256),
+	OptionDescription varchar(256),
+	CPF varchar(50), 
+	AddressLine1 varchar(256), 
+	AddressLine2 varchar(256), 
+	AddressLine3 varchar(256), 
+	Neighbourhood varchar(256), 
+	City varchar(256), 
+	State varchar(256), 
+	PhoneNumber varchar(50), 
+	Description varchar(256), 
+	PostalCode varchar(50), 
+	Comments varchar(256),
+	ShippingAddressId int,
+	Evaluation varchar(256),
+	EvaluationDetails varchar(256),
+	companyname varchar(500),
+	Marca varchar(20)
+)
+distkey(Coupon)
+sortkey(Coupon);*/
+		
+truncate table reports.AllCoupon;
+
+insert into reports.AllCoupon
+SELECT 	cp.PurchaseInitiated as PurchaseDate, 
+		cp.FufillmentDate as ValidationDate, 
+		cast(cp.EmailAddress as varchar(256)) as ValidationName,
+		cp.ValidationMethod,
+		cp.TransferValue,
+		cp.RateValue,
+		cp.TotalTransferValue,
+		cp.code as Coupon,
+		cp.CancelDate,
+		CASE WHEN cp.CancelDate IS NULL then NULL
+			 WHEN cp.CancelDate IS NOT NULL AND cp.PurchaseStatusID = 12 THEN 'Chargeback'
+			 WHEN cp.CancelDate IS NOT NULL AND paf.LastStatusID = 1 THEN 'Antifraud'
+			 WHEN cp.CancelDate IS NOT NULL AND rcb.ChargeBackRefundTypeID = 1 THEN 'Cancelado pelo PU'
+			 WHEN cp.CancelDate IS NOT NULL AND rcb.ChargeBackRefundTypeID = 2 THEN 'Devolucao pelo DOC'
+			 WHEN cp.CancelDate IS NOT NULL AND rcb.ChargeBackRefundTypeID = 3 THEN 'Chargeback'
+			 ELSE 'Credito'
+		END CancelType,
+		cp.Status,
+		cp.Quantity,
+		cp.Name as UserName,
+		cp.EmailAddress as UserEmail,
+		cp.UnifiedDiscountID as DealId,
+		cast(cp.SmallImageUrl as varchar(256)) as DealImage,
+		cast(cp.discountdescription as varchar(256)) as DealName,
+		cast(o.Title as varchar(256)) as OptionName,
+		cast(o.Description as varchar(256)) as OptionDescription,
+		sa.CPF, 
+		cast(sa.AddressLine1 as varchar(256)) AddressLine1, 
+		cast(sa.AddressLine2 as varchar(256)) AddressLine2, 
+		cast(sa.AddressLine3 as varchar(256)) AddressLine3, 
+		cast(sa.Neighbourhood as varchar(256)) Neighbourhood, 
+		cast(sa.City as varchar(256)) City, 
+		cast(sa.State as varchar(256)) State, 
+		sa.PhoneNumber, 
+		cast(sa.Description as varchar(256)) Description, 
+		sa.PostalCode, 
+		cast(sa.Comments as varchar(256)) Comments,
+		sa.ShippingAddressId,
+		cast(ce.Evaluation as varchar(256)) Evaluation,
+		cast(ce.Details as varchar(256)) as EvaluationDetails,
+		cp.companyname,
+		cp.Marca
+			FROM coupon cp
+			LEFT JOIN stage.CouponEvaluation ce 
+				on cp.CuponID = ce.CuponID
+			LEFT join stage.ShippingAddress sa 
+				on sa.PurchaseID = cp.PurchaseID 
+			LEFT JOIN auxUnifiedDiscountBuyingOption2 o
+				ON cp.BuyingOptionId = o.BuyingOptionId 
+				and o.UnifiedDiscountId = cp.UnifiedDiscountId
+			left join auxpaymentantifraud paf
+				on paf.PurchasePaymentDataID = cp.PurchaseID 
+			left join rcb rcb 
+				on rcb.purchaseid = cp.purchaseid 
+				and rcb.cuponid=cp.cuponid;
+			--where 1=1
+			--and trunc(cp.PurchaseInitiated)  >= '2016-11-01'
+			--and trunc(cp.FufillmentDate) <= trunc(getdate())
+			--and cp.companyname = 'Continental eShop'
+analyze reports.AllCoupon;

@@ -1,0 +1,564 @@
+
+drop table if exists #CommercialResult;
+drop table if exists #CommercialResult2;
+drop table if exists #CommercialResult3;
+drop table if exists #CommercialResult4;
+
+set select cast(cast(date_part(year,dateadd(day,-1,getdate())) as varchar(4)) + '/' + cast(date_part(month,dateadd(day,-1,getdate())) as varchar(2)) + '/01' as date) Date;
+set select (select dateadd(day,+1,max(EventDate)) Getdata from reports.DiscountRevenue) GetData;
+set select 0 "Day";
+
+select
+	dr.EventDate
+,	date_part(year,dr.EventDate) EventYear
+,	date_part(month,dr.EventDate) EventMonth
+,	date_part(day,dr.EventDate) EventDay
+,	case when rp.RepresentantName = 'Marcelo Cabreira' then u.UserName else rp.RepresentantName end "Owner"
+,	coalesce(ownerE.OwnerERP,'Em tratamento') OwnerERP
+,	coalesce(ot.Team,'Em tratamento') Team
+,	case
+		when con.Category in ('Entretenimento','Entretenimento, Cultura e Vida Noturna','Entretenimento, Cultuta e Vida Noturna','Lazer')
+		then 'Entret. & Lazer'
+		else con.Category
+	end  Category
+,	sum(coalesce(dr.QTYCoupons,0)) QtyCoupons
+,	sum(coalesce(dr.GrossSales,0)) GrossSales
+,	sum(coalesce(dr.GrossSalesPUCommission,0)) GrossSalesPUCommission
+,	sum(case when mdis.MinEventDate >= '2012-08-01' then coalesce(dr.CancelledPosBilling,0) else 0 end) CommercialCancelledPosBilling
+,	sum(coalesce(dr.CancelledPreBilling,0)) CancelledPreBilling
+,	sum(coalesce(dr.CancelledPreBillingPU,0)) CancelledPreBillingPU
+,	sum(coalesce(dr.NoShow,0)) NoShow
+,	cast(sum(case when AccountStatusPublication in ('Ativação','Reativação') then coalesce(dr.GrossSalesPUCommission,0)*0.4 else coalesce(dr.GrossSalesPUCommission,0)*-0.05 end) as numeric(15,2)) Turbo
+,	0 Adjustment
+,	0 PartnerOnLine
+
+into #CommercialResult
+
+from
+(
+	select
+		EventDate
+	,	UnifiedDiscountID
+	,	DiscountID
+	,	sum(QTYCoupons) QtyCoupons
+	,	sum(GrossSales) GrossSales
+	,	sum(GrossSalesPUCommission) GrossSalesPUCommission
+	,	sum(CancelledPosBilling) CancelledPosBilling
+	,	sum(CancelledPreBilling) CancelledPreBilling
+	,	sum(CancelledPreBillingPU) CancelledPreBillingPU
+	,	sum(NoShow) NoShow
+	
+	from reports.DiscountRevenue
+	where date_part(month,EventDate) = date_part(month,<@Date@>)
+	and date_part(year,EventDate) = date_part(year,<@Date@>)
+	and GrossSales + GrossSalesPUCommission + CancelledPosBilling + CancelledPreBillingPU + NoShow > 0
+	
+	group by
+		EventDate
+	,	UnifiedDiscountID
+	,	DiscountID
+
+	union all
+	
+	select
+		EventDate
+	,	UnifiedDiscountID
+	,	DiscountID
+	,	sum(QTYCoupons) QtyCoupons
+	,	sum(GrossSales) GrossSales
+	,	sum(GrossSalesPUCommission) GrossSalesPUCommission
+	,	sum(CancelledPosBilling) CancelledPosBilling
+	,	sum(CancelledPreBilling) CancelledPreBilling
+	,	sum(CancelledPreBillingPU) CancelledPreBillingPU
+	,	sum(NoShow) NoShow
+
+	from reports.DiscountRevenueMorning
+	where EventDate = <@GetData@>
+
+	group by
+		EventDate
+	,	UnifiedDiscountID
+	,	DiscountID
+	
+	union all
+	
+	select
+		EventDate
+	,	UnifiedDiscountID
+	,	lr.DiscountID
+	,	sum(SoldCoupons) QtyCoupons
+	,	sum(GrossSales) GrossSales
+	,	sum(GrossRevenue) GrossSalesPUCommission
+	,	0 CancelledPosBilling
+	,	0 CancelledPreBilling
+	,	0 CancelledPreBillingPU
+	,	0 NoShow
+
+	from reports.LastRevenueData lr
+	left join reports.LastDiscount ld
+	on lr.DiscountId = ld.DiscountId
+	left join (select distinct EventDate ed from reports.DiscountRevenueMorning) d
+	on EventDate = ed
+	where EventDate = <@GetData@>
+	and ed is null
+	
+
+	group by
+		EventDate
+	,	UnifiedDiscountID
+	,	lr.DiscountID
+
+	) dr
+
+left join 
+(
+select UnifiedDiscountID, ContractId from ods.UnifiedDiscount 
+union 
+select UnifiedDiscountID, ContractId from realtime.dbo_UnifiedDiscount 
+where UnifiedDiscountID not in (select distinct UnifiedDiscountID from ods.UnifiedDiscount)
+
+
+)udis
+on dr.UnifiedDiscountID = udis.UnifiedDiscountID
+
+left join reports.Contract con
+on con.ContractId = udis.ContractID
+
+left join reports.Account acc
+on acc.AccountID = con.AccountID
+
+left join reports.AccountPublication ap
+on acc.AccountID = ap.AccountID
+
+left join
+(
+	select
+		dis.UnifiedDiscountID
+	,	min(dis.RepresentantID) RepresentantID
+
+	from ods.Discount dis
+
+	group by
+		dis.UnifiedDiscountID
+	) urp
+on urp.UnifiedDiscountID = dr.UnifiedDiscountID
+
+left join ods.Representant rp
+on rp.RepresentantID = urp.RepresentantID
+
+left join
+(
+	select
+		dis.UnifiedDiscountID
+	,	min(dr.EventDate) MinEventDate
+	from reports.DiscountRevenue dr
+	left join ods.Discount dis
+	on dr.DiscountID = dis.DiscountID
+
+	where dr.GrossSales > 0
+	group by
+		dis.UnifiedDiscountID
+	) mdis
+on mdis.UnifiedDiscountID = dr.UnifiedDiscountID
+
+left join reports."User" u
+on con.OwnerId = u.UserID
+
+left join reports.OwnerERP ownerE
+on case when rp.RepresentantName = 'Marcelo Cabreira' then u.UserName else rp.RepresentantName end = ownerE."Owner"
+
+left join reports.OwnerTeam ot
+on ownerE.OwnerERP = ot.OwnerERP
+
+left join reports.Team t
+on ot.Team = t.Team
+
+group by
+	dr.EventDate
+,	date_part(year,dr.EventDate)
+,	date_part(month,dr.EventDate)
+,	date_part(day,dr.EventDate)
+,	case when rp.RepresentantName = 'Marcelo Cabreira' then u.UserName else rp.RepresentantName end
+,	coalesce(ownerE.OwnerERP,'Em tratamento')
+,	coalesce(ot.Team,'Em tratamento')
+,	case
+		when con.Category in ('Entretenimento','Entretenimento, Cultura e Vida Noturna','Entretenimento, Cultuta e Vida Noturna','Lazer')
+		then 'Entret. & Lazer'
+		else con.Category
+	end
+
+
+union all
+
+select
+
+	ca.EventDate
+,	date_part(year,ca.EventDate) EventYear
+,	date_part(month,ca.EventDate) EventMonth
+,	date_part(day,ca.EventDate) EventDay
+,	null "Owner"
+,	ca.OwnerERP
+,	coalesce(ot.Team,'Em tratamento') Team
+,	null CategoryName
+,	0 QtyCoupons
+,	0 GrossSales
+,	0 GrossSalesPUCommission
+,	0 CommercialCancelledPosBilling
+,	0 CancelledPreBilling
+,	0 CancelledPreBillingPU
+,	0 NoShow
+,	0 Turbo
+,	cast(ca.Adjustment as numeric(15,2)) Adjustment
+,	0 PartnerOnLine
+
+from reports.CommercialAdjustment ca
+
+left join reports.OwnerTeam ot
+on ca.OwnerERP = ot.OwnerERP
+
+left join reports.Team t
+on ot.Team = t.Team
+where date_part(month,EventDate) = date_part(month,<@Date@>)
+and date_part(year,EventDate) = date_part(year,<@Date@>)
+
+union all
+
+select
+	dis.DateForSale EventDate
+,	date_part(year,dis.DateForSale) EventYear
+,	date_part(month,dis.DateForSale) EventMonth
+,	date_part(day,dis.DateForSale) EventDay
+,	case when rp.RepresentantName = 'Marcelo Cabreira' then u.UserName else rp.RepresentantName end "Owner"
+,	coalesce(ownerE.OwnerERP,'Em tratamento') OwnerERP
+,	coalesce(ot.Team,'Em tratamento') Team
+,	case
+		when con.Category in
+('Entretenimento','Entretenimento, Cultura e Vida Noturna','Entretenimento, Cultuta e Vida Noturna','Lazer')
+		then 'Entret. & Lazer'
+		else con.Category
+	end  Category
+,	0 QtyCoupons
+,	0 GrossSales
+,	0 GrossSalesPUCommission
+,	0 CommercialCancelledPosBilling
+,	0 CancelledPreBilling
+,	0 CancelledPreBillingPU
+,	0 NoShow
+,	0 Turbo
+,	0 Adjustment
+,	count(distinct case when dis.IsPublic = 1 then acc.AccountID else null end) PartnerOnLine
+
+from
+(
+	select
+		DiscountID
+	,	UnifiedDiscountID
+	,	cast(DateForSale as date) DateForSale
+	,	IsPublic
+	
+	from ods.Discount
+	
+	where date_part(month,DateForSale) = date_part(month,<@Date@>)
+	and date_part(year,DateForSale) = date_part(year,<@Date@>)
+	and cast(DateForSale as date) < cast(getdate() as date)
+	
+	) dis
+
+left join ods.UnifiedDiscount udis
+on dis.UnifiedDiscountID = udis.UnifiedDiscountID
+
+left join reports.Contract con
+on con.ContractId = udis.ContractID
+
+left join reports.Account acc
+on acc.AccountID = con.AccountID
+
+left join reports.AccountPublication ap
+on acc.AccountID = ap.AccountID
+
+left join
+(
+	select
+		dis.UnifiedDiscountID
+	,	min(dis.RepresentantID) RepresentantID
+
+	from ods.Discount dis
+
+	group by
+		dis.UnifiedDiscountID
+	) urp
+on urp.UnifiedDiscountID = dis.UnifiedDiscountID
+
+left join ods.Representant rp
+on rp.RepresentantID = urp.RepresentantID
+
+left join
+(
+	select
+		dis.UnifiedDiscountID
+	,	min(dr.EventDate) MinEventDate
+	from reports.DiscountRevenue dr
+	left join ods.Discount dis
+	on dr.DiscountID = dis.DiscountID
+	
+	where dr.GrossSales > 0
+	group by
+		dis.UnifiedDiscountID
+	) mdis
+on mdis.UnifiedDiscountID = dis.UnifiedDiscountID
+
+left join reports."User" u
+on con.OwnerId = u.UserID
+
+left join reports.OwnerERP ownerE
+on case when rp.RepresentantName = 'Marcelo Cabreira' then u.UserName else rp.RepresentantName end = ownerE."Owner"
+
+left join reports.OwnerTeam ot
+on ownerE.OwnerERP = ot.OwnerERP
+
+left join reports.Team t
+on ot.Team = t.Team
+
+group by
+	dis.DateForSale
+,	date_part(year,dis.DateForSale)
+,	date_part(month,dis.DateForSale)
+,	date_part(day,dis.DateForSale)
+,	case when rp.RepresentantName = 'Marcelo Cabreira' then u.UserName else rp.RepresentantName end
+,	coalesce(ownerE.OwnerERP,'Em tratamento')
+,	coalesce(ot.Team,'Em tratamento')
+,	case
+		when con.Category in ('Entretenimento','Entretenimento, Cultura e Vida Noturna','Entretenimento, Cultuta e Vida Noturna','Lazer')
+		then 'Entret. & Lazer'
+		else con.Category
+	end
+;
+
+create table #CommercialResult2
+(
+	EventDate date
+,	EventYear int
+,	EventMonth int
+,	EventDay int
+,	Team varchar(max)
+,	PartnerOnLine int
+,	Rol numeric(15,2)
+,	RolAcum numeric(15,2)
+,	Goal numeric(15,2)
+,	GoalAcum numeric(15,2)
+	)
+distkey(EventDate )
+sortkey(EventDate )
+;
+
+while (dateadd(day,<@Day@>,<@Date@>) < cast(getdate() as date))
+
+{
+
+insert into #CommercialResult2
+
+select
+	dateadd(day,<@Day@>,<@Date@>) EventDate
+,	date_part(year,dateadd(day,<@Day@>,<@Date@>)) EventYear
+,	date_part(month,dateadd(day,<@Day@>,<@Date@>)) EventMonth
+,	date_part(day,dateadd(day,<@Day@>,<@Date@>)) EventDay
+,	coalesce(x.Team,y.Variable) Team
+,	sum(coalesce(x.PartnerOnLine,0)) PartnerOnLine
+,	sum(coalesce(x.Rol,0)) Rol
+,	sum(coalesce(x.RolAcum,0)) RolAcum
+,	sum(coalesce(y.Goal,0)) Goal
+,	sum(coalesce(y.GoalAcum,0)) GoalAcum
+
+from
+(
+	select
+		cr.EventDate
+	,	cr.EventYear
+	,	cr.EventMonth
+	,	cr.EventDay
+	,	cr.Team
+	,	sum(case when cr.EventDate = dateadd(day,<@Day@>,<@Date@>) then cr.GrossSalesPUCommission - cr.CommercialCancelledPosBilling - cr.CancelledPreBillingPU + cr.NoShow else 0 end) Rol
+	,	sum(cr.GrossSalesPUCommission - cr.CommercialCancelledPosBilling - cr.CancelledPreBillingPU + cr.NoShow) RolAcum
+	,	sum(case when cr.EventDate = dateadd(day,<@Day@>,<@Date@>) then PartnerOnLine else 0 end) PartnerOnLine
+
+
+	from #CommercialResult cr
+
+	where cr.EventDate between <@Date@> and dateadd(day,<@Day@>,<@Date@>)
+
+	group by
+		cr.EventDate
+	,	cr.EventYear
+	,	cr.EventMonth
+	,	cr.EventDay
+	,	cr.Team
+	) x
+full join
+(
+	select
+		sg.Date
+	,	Variable
+	,	cast(case when sg.Date = dateadd(day,<@Day@>,<@Date@>) then sg.Weight * g.Goal end as numeric(15,2)) Goal
+	,	cast(sg.Weight * g.Goal as numeric(15,2)) GoalAcum
+
+	from reports.SeasonalGoal sg
+
+	left join reports.Goal g
+	on date_part(month,sg.Date) = g.Month
+	and date_part(year,sg.Date) = g.Year
+
+	where g.[Group] = 'Cidade'
+	and Variable <> 'Total Geral'
+	and sg.Date between <@Date@> and dateadd(day,<@Day@>,<@Date@>)
+	) y
+on x.Team = y.Variable
+and x.EventDate = y.Date
+
+group by
+	coalesce(x.Team,y.Variable);
+
+set select <@Day@> + 1 "Day";
+
+}; 
+
+set select 0 "Day";
+
+create table #CommercialResult3
+(
+	EventDate date
+,	EventYear int
+,	EventMonth int
+,	EventDay int
+,	OwnerERP varchar(max)
+,	PartnerOnLine int
+,	Rol numeric(15,2)
+,	RolAcum numeric(15,2)
+,	Goal numeric(15,2)
+,	GoalAcum numeric(15,2)
+	)
+distkey(EventDate )
+sortkey(EventDate )
+
+;
+
+while (dateadd(day,<@Day@>,<@Date@>) < cast(getdate() as date))
+
+{
+
+insert into #CommercialResult3
+
+select
+	dateadd(day,<@Day@>,<@Date@>) EventDate
+,	date_part(year,dateadd(day,<@Day@>,<@Date@>)) EventYear
+,	date_part(month,dateadd(day,<@Day@>,<@Date@>)) EventMonth
+,	date_part(day,dateadd(day,<@Day@>,<@Date@>)) EventDay
+,	coalesce(x.OwnerERP,y.Variable) OwnerERP
+,	sum(coalesce(x.PartnerOnLine,0)) PartnerOnLine
+,	sum(coalesce(x.Rol,0)) Rol
+,	sum(coalesce(x.RolAcum,0)) RolAcum
+,	sum(coalesce(y.Goal,0)) Goal
+,	sum(coalesce(y.GoalAcum,0)) GoalAcum
+
+from
+(
+	select
+		cr.EventDate
+	,	cr.EventYear
+	,	cr.EventMonth
+	,	cr.EventDay
+	,	cr.OwnerERP
+	,	sum(case when cr.EventDate = dateadd(day,<@Day@>,<@Date@>) then cr.GrossSalesPUCommission - cr.CommercialCancelledPosBilling - cr.CancelledPreBillingPU + cr.NoShow else 0 end) Rol
+	,	sum(cr.GrossSalesPUCommission - cr.CommercialCancelledPosBilling - cr.CancelledPreBillingPU + cr.NoShow) RolAcum
+	,	sum(case when cr.EventDate = dateadd(day,<@Day@>,<@Date@>) then PartnerOnLine else 0 end) PartnerOnLine
+
+	from #CommercialResult cr
+
+	where cr.EventDate between <@Date@> and dateadd(day,<@Day@>,<@Date@>)
+
+	group by
+		cr.EventDate
+	,	cr.EventYear
+	,	cr.EventMonth
+	,	cr.EventDay
+	,	cr.OwnerERP
+	) x
+full join
+(
+	select
+		sg.Date
+	,	Variable
+	,	cast(case when sg.Date = dateadd(day,<@Day@>,<@Date@>) then sg.Weight * g.Goal else 0 end as numeric(15,2)) Goal
+	,	cast(sg.Weight * g.Goal as numeric(15,2)) GoalAcum
+
+	from reports.SeasonalGoal sg
+
+	left join reports.Goal g
+	on date_part(month,sg.Date) = g.Month
+	and date_part(year,sg.Date) = g.Year
+
+	where g.[Group] = 'Executivo de Vendas'
+	and Variable <> 'Total Geral'
+	and sg.Date between <@Date@> and dateadd(day,<@Day@>,<@Date@>)
+	) y
+on x.OwnerERP = y.Variable
+and x.EventDate = y.Date
+
+group by
+	coalesce(x.OwnerERP,y.Variable)
+;
+
+set select <@Day@> + 1 "Day";
+
+};
+
+delete from reports.CommercialResultCity
+where EventDate >= <@Date@>;
+
+insert into reports.CommercialResultCity
+select *
+from #CommercialResult2;
+
+delete from reports.CommercialResultOwnerERP
+where EventDate >= <@Date@>;
+
+insert into reports.CommercialResultOwnerERP
+select *
+from #CommercialResult3;
+
+select
+	EventDate
+,	EventYear
+,	EventMonth
+,	EventDay
+,	OwnerERP
+,	Team
+,	Category
+,	sum(PartnerOnLine) PartnerOnLine
+,	sum(cr.GrossSalesPUCommission - cr.CommercialCancelledPosBilling - cr.CancelledPreBillingPU + cr.NoShow) Rol
+
+into #CommercialResult4
+
+from #CommercialResult cr
+
+where EventDate >= <@Date@>
+
+group by
+	EventDate
+,	EventYear
+,	EventMonth
+,	EventDay
+,	OwnerERP
+,	Team
+,	Category
+;
+
+delete from reports.CommercialResultCategory
+where EventDate >= <@Date@>;
+
+insert into reports.CommercialResultCategory
+select *
+from #CommercialResult4
+;
+
+
+

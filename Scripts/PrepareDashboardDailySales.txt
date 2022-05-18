@@ -1,0 +1,281 @@
+﻿drop table if exists #temp1
+;
+
+					SELECT
+						r.channelID,
+						pg.cityid,
+						COALESCE(uc.categoryid,- 2) AS categoryid,
+						r.eventdate,
+						CASE
+							when (r.qtycoupons + r.qtycouponcancelledprebilling + r.qtycouponcancelledposbilling) = 0 then 0
+            				WHEN (r.grosssales + r.cancelledtotal)/(r.qtycoupons + r.qtycouponcancelledprebilling + r.qtycouponcancelledposbilling) <= 1::numeric::numeric(15,2) THEN 1
+            				ELSE 0
+        				END marketingdeal,
+						pc.assuredpercentage,
+						CASE
+							WHEN pc.assuredpercentage = 1::numeric::numeric(18,	0)::numeric(2,1) THEN 1
+							WHEN pc.earlypercentage = 1::numeric::numeric(18,0)::numeric(2,1) THEN 2
+							ELSE 0
+						END AS paymentsoldcoupons,
+						COALESCE(co.usenow,0) AS usenow,
+						COALESCE(co.dealsclub::integer,	0) AS dealsclub,
+						sum( r.grosssales ) AS grosssales,
+						sum( r.grosssalespucommission ) AS grosssalespucommission,
+						sum( r.grossrevenue ) AS grossrevenue,
+						sum( r.promocodes ) AS promocodes,
+						sum( r.economizedvalue ) AS economizedvalue,
+						sum( r.qtycoupons ) AS qtycoupons,
+						sum( r.qtytransactions ) AS qtytransactions,
+						sum( r.cancelledprebilling ) AS cancelledprebilling,
+						sum( r.cancelledposbilling) AS cancelledposbilling,
+						0 AS lossesaccrual,
+						sum( r.credits ) AS credits,
+						sum( r.cancelledposaccounting ) AS cancelledposaccounting,
+						sum( r.noshow ) AS noshow,
+						sum( r.financecharge ) AS financecharge,
+						sum( r.cancelledprebillingpu ) AS cancelledprebillingpu,
+						sum( r.qtycouponcancelledprebilling ) AS qtycouponcancelledprebilling,
+						sum( r.qtycouponcancelledposbilling ) AS qtycouponcancelledposbilling,
+						sum( r.cancelledposbillingpu ) AS cancelledposbillingpu,
+						sum(extrafees) extrafees,
+						sum(extrafeespu) extrafeespu,
+						sum(timetopayeconomy) timetopayeconomy,
+						sum(anticipationcost) anticipationcost,
+						sum(antifraudfee) antifraudfee,
+						sum(aquirerfee) aquirerfee,
+						sum(cancellationextrafees) cancellationextrafees,
+						sum(cancellationextrafeespu) cancellationextrafeespu,
+						sum(cancellationpromocodes) cancellationpromocodes,
+						sum(cancellationfinancecharge) cancellationfinancecharge,
+						sum(taxes) taxes,
+						sum(chargeback) chargeback,
+						sum(cancelledtotal) cancelledtotal,
+						sum(r.administrativefee) administrativefee,
+						sum(r.administrativefeecancelled) administrativefeecancelled
+						
+					into #temp1
+					FROM
+						reports.discountrevenue r
+					LEFT JOIN reports.page pg ON
+						r.salespageid = pg.pageid
+					LEFT JOIN ods.unifieddiscount u ON
+						r.unifieddiscountid = u.unifieddiscountid
+					LEFT JOIN reports.contract co ON
+						co.contractid = u.contractid
+					LEFT JOIN reports.paymentcondition pc ON
+						u.paymentcondition::text = pc.paymentcondition::text
+					LEFT JOIN reports.unifieddiscountcategory uc ON
+						uc.unifieddiscountid = r.unifieddiscountid
+					where r.channelID in (1,6)
+				    GROUP BY 1,2,3,4,5,6,7,8,9
+
+
+
+
+
+;
+drop table if exists #dailysales
+;
+SELECT
+		'T' AS total
+,	datepart(year,x.EventDate) EventYear
+,	case
+		when datediff(month,x.EventDate,getdate()) > 3 
+		then null
+		else datepart(day,x.EventDate)
+	end EventDay			
+,	case
+		when datepart(day,x.EventDate) <= D
+		then 1
+		else 0
+	end UpToD
+,	case	
+		when datepart(month,x.EventDate) = 1 then 'jan'
+		when datepart(month,x.EventDate) = 2 then 'fev'
+		when datepart(month,x.EventDate) = 3 then 'mar'
+		when datepart(month,x.EventDate) = 4 then 'abr'
+		when datepart(month,x.EventDate) = 5 then 'mai'
+		when datepart(month,x.EventDate) = 6 then 'jun'
+		when datepart(month,x.EventDate) = 7 then 'jul'
+		when datepart(month,x.EventDate) = 8 then 'ago'
+		when datepart(month,x.EventDate) = 9 then 'set'
+		when datepart(month,x.EventDate) = 10 then 'out'
+		when datepart(month,x.EventDate) = 11 then 'nov'
+		when datepart(month,x.EventDate) = 12 then 'dez'
+	end eventmonthtxt
+,	case
+		when datediff(day,x.EventDate,cast(getdate() as date)) > 3
+		then 0
+		else 1
+	end putemailbody,
+		ct.categoryname,
+		cy.cityname,
+		cy.isactive AS cityisactive,
+		cy.istop AS cityistop,
+		coalesce(x.marketingdeal,0) marketingdeal,
+		x.dealsclub,
+		x.usenow,
+		COALESCE(
+			x.assuredpercentage,
+			0::numeric::numeric(
+				18,
+				0
+			)
+		) AS assuredpercentage,
+		x.paymentsoldcoupons,
+		sum( x.grosssales ) AS grosssales,
+		sum( x.grosssalespucommission ) AS grosssalespucommission,
+		sum( x.grossrevenue ) AS grossrevenue,
+		sum( x.promocodes ) AS promocodes,
+		sum( x.economizedvalue ) AS economizedvalue,
+		sum( x.qtycoupons ) AS qtycoupons,
+		sum( x.qtytransactions ) AS qtytransactions,
+		sum( x.cancelledprebillingpu ) AS cancelledprebillingpu,
+		sum( x.cancelledprebilling ) AS cancelledprebilling,
+		sum( x.cancelledposbilling ) AS cancelledposbilling,
+		sum( x.credits ) AS credits,
+		sum( x.lossesaccrual ) AS lossesaccrual,
+		0 AS visits,
+		sum( x.noshow ) AS noshow,
+		sum( x.cancelledposaccounting ) AS cancelledposaccounting,
+		sum( x.financecharge ) AS financecharge,
+		sum( x.qtycouponcancelledprebilling ) AS qtycouponcancelledprebilling,
+		sum( x.qtycouponcancelledposbilling ) AS qtycouponcancelledposbilling,
+		sum( x.cancelledposbillingpu ) AS cancelledposbillingpu,
+		sum(extrafees) extrafees,
+		sum(extrafeespu) extrafeespu,
+		sum(timetopayeconomy) timetopayeconomy,
+		sum(anticipationcost) anticipationcost,
+		sum(antifraudfee) antifraudfee,
+		sum(aquirerfee) aquirerfee,
+		sum(cancellationextrafees) cancellationextrafees,
+		sum(cancellationextrafeespu) cancellationextrafeespu,
+		sum(cancellationpromocodes) cancellationpromocodes,
+		sum(cancellationfinancecharge) cancellationfinancecharge,
+		sum(taxes) taxes,
+		sum(chargeback) chargeback,
+		sum(cancelledtotal) cancelledtotal,
+		sum(administrativefee) administrativefee,
+		sum(administrativefeecancelled) administrativefeecancelled,		
+		x.channelid,
+		st.statename
+	into #dailysales
+	FROM #temp1 x
+	LEFT JOIN reports.category ct ON
+		x.categoryid = ct.categoryid
+	LEFT JOIN reports.city cy ON
+		cy.cityid = x.cityid
+	left join ods.state st on 
+	cy.stateid = st.stateid
+	LEFT JOIN ods.regioncountry rc ON
+		rc.regioncountryid = cy.regioncountryid
+	JOIN(
+			SELECT
+				pgdate_part(
+					'day'::character varying::text,
+					"max"(discountrevenue.eventdate)::timestamp without time zone
+				) AS d
+			FROM
+				reports.discountrevenue
+		) utd ON
+		1 = 1
+	GROUP BY 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,x.channelid,st.statename
+;
+
+
+
+insert into #dailysales 
+select
+		'T' AS total
+,	datepart(year,x.EventDate) EventYear
+,	case
+		when datediff(month,x.EventDate,getdate()) > 3 
+		then null
+		else datepart(day,x.EventDate)
+	end EventDay			
+,	case
+		when datepart(day,x.EventDate) <= D
+		then 1
+		else 0
+	end UpToD
+,	case	
+		when datepart(month,x.EventDate) = 1 then 'jan'
+		when datepart(month,x.EventDate) = 2 then 'fev'
+		when datepart(month,x.EventDate) = 3 then 'mar'
+		when datepart(month,x.EventDate) = 4 then 'abr'
+		when datepart(month,x.EventDate) = 5 then 'mai'
+		when datepart(month,x.EventDate) = 6 then 'jun'
+		when datepart(month,x.EventDate) = 7 then 'jul'
+		when datepart(month,x.EventDate) = 8 then 'ago'
+		when datepart(month,x.EventDate) = 9 then 'set'
+		when datepart(month,x.EventDate) = 10 then 'out'
+		when datepart(month,x.EventDate) = 11 then 'nov'
+		when datepart(month,x.EventDate) = 12 then 'dez'
+	end eventmonthtxt
+,	case
+		when datediff(day,x.EventDate,cast(getdate() as date)) > 3
+		then 0
+		else 1
+	end putemailbody,
+		'_Não Mapeado' AS categoryname,
+		'_Não Mapeado' AS cityname,
+		1 AS cityisactive,
+		1 AS cityistop,
+		0 AS marketingdeal,
+		0 AS dealsclub,
+		0 AS usenow,
+		0 AS assuredpercentage,
+		0 AS paymentsoldcoupons,
+		0 AS grosssales,
+		0 AS grosssalespucommission,
+		0 AS grossrevenue,
+		0 AS promocodes,
+		0 AS economizedvalue,
+		0 AS qtycoupons,
+		0 AS qtytransactions,
+		0 AS cancelledprebillingpu,
+		0 AS cancelledprebilling,
+		0 AS cancelledposbilling,
+		0 AS credits,
+		0 AS lossesaccrual,
+		sum( x.visits ) AS visits,
+		0 AS noshow,
+		0 AS cancelledposaccounting,
+		0 AS financecharge,
+		0 AS qtycouponcancelledprebilling,
+		0 AS qtycouponcancelledposbilling,
+		0 AS cancelledposbillingpu,
+		0 as extrafees,
+		0 as extrafeespu,
+		0 as timetopayeconomy,
+		0 as anticipationcost,
+		0 as antifraudfee,
+		0 as  aquirerfee,
+		0 as cancellationextrafees,
+		0 as cancellationextrafeespu,
+		0 as cancellationpromocodes,
+		0 as cancellationfinancecharge,
+		0 as taxes,
+		0 as chargeback,
+		0 as cancelledtotal,
+		0 administrativefee,
+		0 administrativefeecancelled,
+		channelid,
+		'_Não Mapeado' statename
+
+	FROM
+		reports.visitsanalytics x
+		inner join
+		(
+		select datepart(day,max(EventDate)) D
+		from reports.DiscountRevenue
+		) utd
+on 1 = 1
+	GROUP BY 1,2,3,4,5,6,channelid
+	;
+	
+delete from reports.DashboardDailySales
+;
+insert into reports.DashboardDailySales
+select * from #dailysales
+;

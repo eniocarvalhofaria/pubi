@@ -1,0 +1,7 @@
+﻿		sale.salespageid in
+		(
+				select pageid from ods.page
+				where cityid not in (50100013,3000340)
+				and iscompetitorpage = 0
+		) and
+		sale.promocodes > 0

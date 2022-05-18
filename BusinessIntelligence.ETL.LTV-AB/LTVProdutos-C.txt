@@ -1,0 +1,6 @@
+﻿		sale.salespageid in
+		(
+				select pageid from ods.page
+				where cityid in (3000340)
+				and iscompetitorpage = 0
+		)

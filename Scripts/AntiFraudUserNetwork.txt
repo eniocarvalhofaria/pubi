@@ -1,0 +1,157 @@
+﻿-- Criacao da tabela reports.network V.1.00
+
+
+create temporary table pp
+(
+	 purchaseid  int
+	,purchasestatusid int
+	,purchaseruseraccountid int 
+	,purchaseinitiated date
+	,deviceinstallid varchar(300)
+	,landingpageurl varchar(1000)
+)
+distkey(purchaseid)
+sortkey(purchaseid);
+
+
+
+insert into pp
+	select purchaseid,purchasestatusid,purchaseruseraccountid,purchaseinitiated,deviceinstallid,landingpageurl
+		from ods.purchase (nolock) where cast(purchaseinitiated as date) >= current_date - 1;
+
+analyze pp;
+
+
+create temporary table p1
+(
+			 purchaseruseraccountid int
+			,purchasepaymentdataid int
+			,purchaseid int
+			,purchaseinitiated date
+			,purchasestatusid int
+			,deviceinstallid varchar(300)
+			,cardholdername varchar(300)
+			,cardnumber varchar(300)
+			,useraccountid int
+			,emailaddress varchar(300)
+			,dateregistered date
+			,password varchar(300)
+			,purchasestatusname varchar(300)			
+			,Os varchar(300)
+			,AppVersion varchar(300)
+)
+distkey(purchasepaymentdataid)
+sortkey(purchasepaymentdataid);
+
+
+
+insert into p1
+		select
+			 pp.purchaseruseraccountid
+			,ppd.purchasepaymentdataid
+			,pp.purchaseid
+			,pp.purchaseinitiated
+			,pp.purchasestatusid
+			,pp.deviceinstallid
+			,ppd.cardholdername
+			,ppd.cardnumber
+			,ua.useraccountid
+			,ua.emailaddress
+			,ua.dateregistered
+			,ua.password
+			,ps.purchasestatusname
+			,max(split_part(split_part(pp.landingpageurl,'|',1), 'OS:', 2 )) as Os
+			,max(split_part(split_part(pp.landingpageurl,'| OS_VERSION',1), '| APP_VERSION:', 2)) as AppVersion
+		from pp
+			left join ods.purchasepaymentdata ppd	on ppd.internalreferencenumber = pp.purchaseid
+			left join ods.useraccount ua            on ua.useraccountid = pp.purchaseruseraccountid
+             left join stage.purchasestatus ps      on ps.purchasestatusid = pp.purchasestatusid			
+		where 1=1
+		group by
+		1,2,3,4,5,6,7,8,9,10,11,12,13;
+
+--analyze p1;
+
+
+
+create temporary table p2
+(
+ purchasepaymentdataid int,
+ IP varchar(100),
+ CPF varchar(100),
+ DDD varchar(100),
+ TELEFONE varchar(100) 
+)
+distkey(purchasepaymentdataid)
+sortkey(purchasepaymentdataid);
+
+insert into p2
+SELECT
+   paf.purchasepaymentdataid
+, max(case
+				when replace(regexp_substr(pafh.datasend,'<ipAddress>[A-Za-z0-9.:/-]*'),'<ipAddress>','') = '' then (replace(regexp_substr(pafh.datasend,'<_document_ClearSale_Orders_Order_IP>[A-Za-z0-9.:/-]*'),'<_document_ClearSale_Orders_Order_IP>',''))
+				else replace(regexp_substr(pafh.datasend,'<ipAddress>[A-Za-z0-9.:/-]*'),'<ipAddress>','') end 
+  ) as IP
+, max(case
+				when replace(regexp_substr(pafh.datasend,'<billingCPF>[A-Za-z0-9.:/-]*'),'<billingCPF>','') = '' then (replace(regexp_substr(pafh.datasend,'<_document_ClearSale_Orders_Order_CollectionData_LegalDocument1>[A-Za-z0-9.:/-]*'),'<_document_ClearSale_Orders_Order_CollectionData_LegalDocument1>',''))
+				else replace(regexp_substr(pafh.datasend,'<billingCPF>[A-Za-z0-9.:/-]*'),'<billingCPF>','') end
+	) as CPF
+,  max(case 
+				when left(replace(regexp_substr(pafh.datasend,'<billingNumber>[A-Za-z0-9.:/-]*'),'<billingNumber>',''),2) <> '' then left(replace(regexp_substr(pafh.datasend,'<billingNumber>[A-Za-z0-9.:/-]*'),'<billingNumber>',''),2)
+				when (replace(regexp_substr(pafh.datasend,'<_document_ClearSale_Orders_Order_CollectionData_Phones_Phone_DDD>[A-Za-z0-9– . –]*'),'<_document_ClearSale_Orders_Order_CollectionData_Phones_Phone_DDD>','')) <> '' then (replace(regexp_substr(pafh.datasend,'<_document_ClearSale_Orders_Order_CollectionData_Phones_Phone_DDD>[A-Za-z0-9– . –]*'),'<_document_ClearSale_Orders_Order_CollectionData_Phones_Phone_DDD>',''))
+				else left(replace(regexp_substr(pafh.datasend,'<_document_RequestScore_Telephone>[A-Za-z0-9– . –]*'),'<_document_RequestScore_Telephone>',''),2) end 
+		  ) as DDD
+,  max(case
+		when right(replace(regexp_substr(pafh.datasend,'<billingNumber>[A-Za-z0-9.:/-]*'),'<billingNumber>',''),9) <> '' then right(replace(regexp_substr(pafh.datasend,'<billingNumber>[A-Za-z0-9.:/-]*'),'<billingNumber>',''),9) 
+		when (replace(regexp_substr(pafh.datasend,'<_document_ClearSale_Orders_Order_CollectionData_Phones_Phone_Number>[A-Za-z0-9– . –]*'),'<_document_ClearSale_Orders_Order_CollectionData_Phones_Phone_Number>','')) <> '' then (replace(regexp_substr(pafh.datasend,'<_document_ClearSale_Orders_Order_CollectionData_Phones_Phone_Number>[A-Za-z0-9– . –]*'),'<_document_ClearSale_Orders_Order_CollectionData_Phones_Phone_Number>',''))
+		else right(replace(regexp_substr(pafh.datasend,'<_document_RequestScore_Telephone>[A-Za-z0-9– . –]*'),'<_document_RequestScore_Telephone>',''),9) end 
+   ) as TELEFONE
+FROM p1 
+left join   ods.paymentantifraud paf  on p1.purchasepaymentdataid = paf.purchasepaymentdataid
+left  join   ods.paymentantifraudhistory pafh  (nolock) on paf.paymentantifraudid = pafh.paymentantifraudid
+where  trim(pafh.datasend) is not null 
+GROUP BY 1;
+	
+analyze p2;
+
+
+SELECT
+	p1.useraccountid
+,	p1.emailaddress
+, 	p1.dateregistered
+,	p1.password
+,	p1.purchaseid
+,	p1.purchaseinitiated
+,	p1.Os
+,	p1.AppVersion
+,	p1.purchasestatusname
+,	p1.deviceinstallid
+,	p1.cardholdername
+,	p1.cardnumber
+,   max(p2.IP) as IP
+,   max(p2.CPF) as CPF
+,   max(p2.DDD)   as DDD
+,   max(p2.TELEFONE)   as TELEFONE
+into #t_final
+FROM p1
+left join p2 on p1.purchasepaymentdataid = p2.purchasepaymentdataid
+where  1 = 1
+group by 1,2,3,4,5,6,7,8,9,10,11,12
+;
+
+
+
+delete from reports.network
+where cast(purchaseinitiated as date) >= current_date - 1;
+
+insert into reports.network
+select * from #t_final;
+ 
+ drop table pp;
+ drop table p1;
+ drop table p2;
+ drop table #t_final;
+ 
+
+
+ 

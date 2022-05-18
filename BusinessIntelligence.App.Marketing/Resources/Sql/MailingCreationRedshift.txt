@@ -1,0 +1,28 @@
+﻿  drop table if exists #MailingSelection
+  ;
+
+  drop table if exists #MailingExclusion
+;
+delete from reports.MailingUserAccount where CampaignId in (<@CampaignIds@>)
+;
+create table #MailingExclusion
+( UserAccountId int)
+distkey (UserAccountId)
+sortkey (UserAccountId)
+;
+
+insert into #MailingExclusion
+select distinct UserAccountId 
+
+from reports.MailingUserAccount where 
+<@CampaignExclusion@>
+;
+<@QuerySelection@>
+
+
+
+
+
+
+
+

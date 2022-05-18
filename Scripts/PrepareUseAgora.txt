@@ -1,0 +1,250 @@
+--Useagora
+
+drop table if exists useagora;
+create temporary table useagora(
+contrato integer,
+unifieddiscountid integer,
+c_digo_oferta_num_rico integer,
+"clube de ofertas" varchar(10),
+cupom_impresso varchar(100),
+agendamento varchar(101),
+"use agora" varchar(10)
+)
+distkey(unifieddiscountid)
+sortkey(unifieddiscountid);
+
+insert into useagora(
+select contract
+, unifieddiscountid
+, "of"
+, CASE WHEN "Clube de ofertas" = 'Sim' THEN 1 ELSE 0 END AS "Clube de ofertas"
+, case when cupom_impresso ='Apresentar cupom no aplicativo oficial do Peixe Urbano ou impresso (Recomendado)' then 'Apresentar Cupom no App ou Impresso (Recomendado)'
+	   else cupom_impresso
+ end cupom_impresso
+, agendamento
+, case when cupom_impresso ='Apresentar cupom no aplicativo oficial do Peixe Urbano ou impresso (Recomendado)' and agendamento = '' then null
+	 when cupom_impresso ='Apresentar cupom no aplicativo oficial do Peixe Urbano ou impresso (Recomendado)' and agendamento ='Não precisa agendar' then 1
+	 when cupom_impresso ='Apresentar cupom no aplicativo oficial do Peixe Urbano ou impresso (Recomendado)' and agendamento ='Site do Parceiro' then 1
+	 when cupom_impresso ='Basta informar o código do cupom da forma que preferir' and agendamento ='' then null
+	 when cupom_impresso ='Basta informar o código do cupom da forma que preferir' and agendamento ='Não precisa agendar' then 1
+	 when cupom_impresso ='Basta informar o código do cupom da forma que preferir' and agendamento ='Site do Parceiro' then 1
+	 when cupom_impresso ='Apresentar Cupom no App ou Impresso (Recomendado)' and agendamento ='' then null
+	 when cupom_impresso ='Apresentar Cupom no App ou Impresso (Recomendado)' and agendamento ='Não precisa agendar' then 1
+	 when cupom_impresso ='Apresentar Cupom no App ou Impresso (Recomendado)'and agendamento ='Site do Parceiro' then 1
+	 when cupom_impresso ='Usar cupom no site do Parceiro'and agendamento ='Site do Parceiro' then 1
+	 when cupom_impresso = '' and agendamento = '' then null
+	 when cupom_impresso is null and agendamento is null then null
+	 else 0
+ end "Use Agora"
+from (
+	SELECT 
+		cast(ccp.name as int) contract
+		, udis.unifieddiscountid
+		, c_digo_oferta_num_rico "of"
+		, CASE WHEN cto.of_clube_de_ofertas IS NOT NULL THEN cto.of_clube_de_ofertas
+			ELSE ccp.clube_de_ofertas_texto
+		  END "Clube de Ofertas"
+		, CASE WHEN cto.of_necess_rio_levar_o_cupom_impresso is not null then cto.of_necess_rio_levar_o_cupom_impresso
+			ELSE ccp.necess_rio_levar_o_cupom_impresso
+		  END as cupom_Impresso
+		, CASE WHEN cto.of_m_todo_de_agendamento is not null then cto.of_m_todo_de_agendamento 
+			ELSE ccp.agendamento_ser_feito 
+		  END as Agendamento
+	FROM salesforce.ctcontratopu ccp
+	left join salesforce.ctofertas cto
+		on cto.contrato_pu = ccp.id
+	left join ods.unifieddiscount udis
+		on cast(ccp.name as int) = udis.contractid	
+	group by ccp.name, udis.unifieddiscountid, c_digo_oferta_num_rico
+	, CASE WHEN cto.of_clube_de_ofertas IS NOT NULL THEN cto.of_clube_de_ofertas ELSE ccp.clube_de_ofertas_texto END
+	, CASE WHEN cto.of_necess_rio_levar_o_cupom_impresso is not null then cto.of_necess_rio_levar_o_cupom_impresso ELSE ccp.necess_rio_levar_o_cupom_impresso END
+	, CASE WHEN cto.of_m_todo_de_agendamento is not null then cto.of_m_todo_de_agendamento ELSE ccp.agendamento_ser_feito END)
+);
+
+drop table if exists daily;
+create temporary table daily(
+    uid int4
+,   contract_number int4
+,   dateforsale date    
+,	pagename varchar(100)
+,	accountregion varchar(100)
+,	discount_start date
+,	discount_end date
+,   expire_date date
+,	idoferta int4
+,	Discountname varchar(512)
+,	partnername varchar(300)
+,	sold_cupons int4
+,	GrossSales decimal(10,2)
+,	proprietario_oferta varchar(52)
+,	Team varchar(56)
+,	Coordinator varchar(56)
+,	Manager varchar(56)
+,	category_name varchar(56)
+,	tipo_site varchar(32)
+,	categoria_site varchar(64)
+,	sub_categoria_site varchar(82)
+)
+distkey(uid)
+sortkey(uid);
+insert into daily(
+                  SELECT
+                        uid
+                    ,   contract_number
+                    ,   CAST(dateforsale AS DATE) dateforsale   
+                    ,	pagename
+                    ,	TRIM(regexp_replace(accountregion, '\r|\n|\t','g')) as accountregion
+                    ,	CAST(discount_start AS DATE) discount_start
+                    ,	CAST(discount_end AS DATE) discount_end
+                    ,   CAST(expire_date AS DATE) expire_date
+                    ,	idoferta
+                    ,	TRIM(regexp_replace(Discountname, '\r|\n|\t','g')) as Discountname
+                    ,	partnername
+                    ,	sold_cupons
+                    ,	GrossSales
+                    ,	proprietario_oferta
+                    ,	Team
+                    ,	Coordinator
+                    ,	Manager
+                    ,	category_name
+                    ,	tipo_site
+                    ,	categoria_site
+                    ,	sub_categoria_site
+                  FROM reports.dailyentries
+                  where extract(year from dateforsale) = extract(year from dateadd(day,-4,getdate()))
+                  and extract(month from dateforsale) = extract(month from dateadd(day,-4,getdate()))
+                  AND category_name not in ('Comércio e Serviços Online','Viagem e Turismo')
+                  AND public = true
+                  )
+;
+
+TRUNCATE TABLE reports.useagora;
+
+INSERT INTO reports.useagora
+SELECT
+    "Contrato"
+,	"Pagina"
+,	"Regiao"
+,	mesvenda
+,	anovenda
+,	"Inicio da Oferta"
+,	"Fim da Oferta"
+,   "Data de Expiracao"
+,	uid
+,	"OF"
+,	"Discount Name"
+,	"Parceiro"
+,	SUM("Cupons Vendidos") AS "Cupons Vendidos"
+,   SUM("Venda Bruta") AS "Venda Bruta"
+,	"Proprietario da Oferta"
+,	"Time"
+,	"Coordenador"
+,	"Gerente"
+,	"Categoria"
+,	"Tipo Site"
+,	"Categoria Site"
+,	"Subcategoria Site"
+, 	"Clube de Ofertas"
+,	"cupom impresso"
+,	"agendamento"
+,	"Use Agora"
+FROM(
+select distinct
+    contract_number AS "Contrato"
+,   dateforsale    
+,	pagename AS "Pagina"
+,	de.accountregion AS "Regiao"
+,	date_part('month', dateforsale) AS mesvenda
+,	date_part('year', dateforsale) AS anovenda
+,	discount_start AS "Inicio da Oferta"
+,	discount_end AS "Fim da Oferta"
+,   expire_date AS "Data de Expiracao"
+,	uid
+,	idoferta AS "OF"
+,	Discountname as "Discount Name"
+,	partnername AS "Parceiro"
+,	de.sold_cupons AS "Cupons Vendidos"
+,	GrossSales AS "Venda Bruta"
+,	proprietario_oferta AS "Proprietario da Oferta"
+,	Team AS "Time"
+,	Coordinator AS "Coordenador"
+,	Manager AS "Gerente"
+,	category_name AS "Categoria"
+,	de.tipo_site AS "Tipo Site"
+,	de.categoria_site AS "Categoria Site"
+,	de.sub_categoria_site AS "Subcategoria Site"
+, 	case when "clube de ofertas" = 0 then 0
+         when cast(discount_end as date) = '2050-01-01' then 1
+		 else 1
+	end AS "Clube de Ofertas"
+,	cupom_impresso AS "cupom impresso"
+,	agendamento AS "agendamento"
+,	"Use Agora"	 
+FROM daily de
+left join useagora ct 
+ON ct.c_digo_oferta_num_rico = de.idoferta
+where idoferta IS NOT NULL
+AND idoferta <> 0
+and discount_end >= dateforsale
+UNION ALL
+select distinct
+    contract_number AS "Contrato"
+,   dateforsale    
+,	pagename AS "Pagina"
+,	de.accountregion AS "Regiao"
+,	date_part('month', dateforsale) AS mesvenda
+,	date_part('year', dateforsale) AS anovenda
+,	discount_start AS "Inicio da Oferta"
+,	discount_end AS "Fim da Oferta"
+,   expire_date AS "Data de Expiracao"
+,	uid
+,	contrato AS "OF"
+,	Discountname as "Discount Name"
+,	partnername AS "Parceiro"
+,	de.sold_cupons AS "Cupons Vendidos"
+,	GrossSales AS "Venda Bruta"
+,	proprietario_oferta AS "Proprietario da Oferta"
+,	Team AS "Time"
+,	Coordinator AS "Coordenador"
+,	Manager AS "Gerente"
+,	category_name AS "Categoria"
+,	de.tipo_site AS "Tipo Site"
+,	de.categoria_site AS "Categoria Site"
+,	de.sub_categoria_site AS "Subcategoria Site"
+, 	case when "clube de ofertas" = 0 then 0
+         when cast(discount_end as date) = '2050-01-01' then 1
+		 else 1
+	end AS "Clube de Ofertas"
+,	cupom_impresso AS "cupom impresso"
+,	agendamento AS "agendamento"
+,	"Use Agora"	 
+FROM daily de
+left join useagora ct 
+ON de.uid = ct.unifieddiscountid
+where (idoferta IS NULL OR idoferta = 0)
+and discount_end >= dateforsale
+)
+GROUP BY "Contrato"
+,	"Pagina"
+,	"Regiao"
+,	mesvenda
+,	anovenda
+,	"Inicio da Oferta"
+,	"Fim da Oferta"
+,   "Data de Expiracao"
+,	uid
+,	"OF"
+,	"Discount Name"
+,	"Parceiro"
+,	"Proprietario da Oferta"
+,	"Time"
+,	"Coordenador"
+,	"Gerente"
+,	"Categoria"
+,	"Tipo Site"
+,	"Categoria Site"
+,	"Subcategoria Site"
+, 	"Clube de Ofertas"
+,	"cupom impresso"
+,	"agendamento"
+,	"Use Agora";

@@ -1,0 +1,21 @@
+﻿		sale.salespageid in
+		(
+				select pageid from ods.page
+				where cityid in (3000340)
+				and iscompetitorpage = 0
+		) and
+		sale.Purchaseid in 
+		(
+				select purchaseid from stage.LogPromotionalCodeUse 
+				where PromotionalCodeID in 
+				(
+					select promotionalCodeId
+					from stage.promotionalcode
+					where validationclass in
+						(
+							'PeixeUrbano.Promocode.Validation.Rules.FbLogin',
+							'PeixeUrbano.Promocode.Validation.Rules.FbLoginNoPurchase'
+						)
+					or isfacebookrequired = 1
+				)
+		)

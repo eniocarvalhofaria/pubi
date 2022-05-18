@@ -1,0 +1,105 @@
+﻿delete from reports.PurchaseOrder;
+
+insert into reports.PurchaseOrder
+select 
+	PurchaseId
+,	coalesce(uu.unifieduseraccountid,s.useraccountid) useraccountid
+,	case when SourceId = 2 or OSAccessCode between 2 and 6 or httpreferrer like '%OS: android%' or httpreferrer like '%OS: ios%' then 2 else 1 end SourceId
+,	discountId
+,	s.unifiedDiscountId
+,	dc.CategoryId
+,	grossSales
+,	grossSales - promocodes AmountSpent
+,	grossrevenue 
+,	grossSales * AverageCommission grossrevenueBalanced
+,	((grossSales * AverageCommission) - promocodes) GrossRevenueMinusPromocode
+,	promocodes
+,	coalesce(CancellationLoss,0) CancellationLoss
+,	grossrevenue - coalesce(CancellationLoss,0) NetRevenue
+,	grossrevenue - coalesce(CancellationLoss,0) - case when  CancellationLoss > 0 then 0 else coalesce(promocodes,0) end NetRevenueMinusPromocode
+,	EventDate
+,	left(EventDate::text, 7)
+,	rank() over(partition by coalesce(uu.unifieduseraccountid,s.useraccountid) order by s.PurchaseInitiated asc,s.PurchaseId asc) PurchaseOrder
+,	'S' isUserAccountUnified
+,	s.salespageid
+from ods.Sales s
+left join reports.useraccountunification uu
+on s.useraccountid = uu.useraccountid
+left join 
+(
+	select 
+		PurchaseId CancelledPurchaseId
+	,	sum(cancelledpucommission + case when iscancelledcouponpaidbypu = 1 then cancelledamounttopartner else 0 end) CancellationLoss
+	from ods.Cancellations
+	group by 1
+) can
+on s.purchaseid = can.CancelledPurchaseId
+left join reports.unifiedDiscountCategory dc
+on s.unifieddiscountId = dc.unifieddiscountId
+left join
+(
+	select 
+		 sum(GrossRevenue) /sum(cast(GrossSales as decimal(18,4))) AverageCommission
+	,	dc.CategoryId
+	from reports.DiscountRevenue dr
+	left join reports.unifiedDiscountCategory dc
+	on dr.unifieddiscountId = dc.unifieddiscountId
+	where GrossSales > 0
+	and EventDate between (getdate()::date - interval '71 days') and (getdate()::date - interval '1 day')
+	group by
+	dc.CategoryId
+) ac
+on dc.categoryid = ac.categoryid
+where Type = 1
+;
+
+insert into reports.PurchaseOrder
+select 
+	PurchaseId
+,	s.useraccountid
+,	case when SourceId = 2 or OSAccessCode between 2 and 6 or httpreferrer like '%OS: android%' or httpreferrer like '%OS: ios%' then 2 else 1 end SourceId
+,	discountId
+,	s.unifiedDiscountId
+,	dc.CategoryId
+,	grossSales
+,	grossSales - promocodes AmountSpent
+,	grossrevenue 
+,	grossSales * AverageCommission grossrevenueBalanced
+,	((grossrevenue ) - promocodes) GrossRevenueMinusPromocode
+,	promocodes
+,	coalesce(CancellationLoss,0) CancellationLoss
+,	grossrevenue - coalesce(CancellationLoss,0) NetRevenue
+,	grossrevenue - coalesce(CancellationLoss,0) - case when  CancellationLoss > 0 then 0 else  coalesce(promocodes,0)  end NetRevenueMinusPromocode
+,	EventDate
+,	left(EventDate::text, 7)
+,	rank() over(partition by s.useraccountid order by s.PurchaseInitiated asc,s.PurchaseId asc) PurchaseOrder
+,	'N' isUserAccountUnified
+,	s.salespageid
+from ods.Sales s
+left join 
+(
+	select 
+		PurchaseId CancelledPurchaseId
+	,	sum(cancelledpucommission + case when iscancelledcouponpaidbypu = 1 then cancelledamounttopartner else 0 end) CancellationLoss
+	from ods.Cancellations
+	group by 1
+) can
+on s.purchaseid = can.CancelledPurchaseId
+left join reports.unifiedDiscountCategory dc
+on s.unifieddiscountId = dc.unifieddiscountId
+left join
+(
+	select 
+		 sum(GrossRevenue) /sum(cast(GrossSales as decimal(18,4))) AverageCommission
+	,	dc.CategoryId
+	from reports.DiscountRevenue dr
+	left join reports.unifiedDiscountCategory dc
+	on dr.unifieddiscountId = dc.unifieddiscountId
+	where GrossSales > 0
+	and EventDate between (getdate()::date - interval '71 days') and (getdate()::date - interval '1 day')
+	group by
+	dc.CategoryId
+) ac
+on dc.categoryid = ac.categoryid
+where Type = 1
+;

@@ -1,0 +1,130 @@
+drop table if exists #UnifiedDiscount;commit;
+
+
+select
+	UnifiedDiscountID
+,	ContractID
+,	AccountID
+,	case when MinEventDate < MinDateForSale then MinEventDate else coalesce(MinDateForSale,MinEventDate) end StartDate
+,	case when MaxEventDate > MaxDateForSale then MaxEventDate else coalesce(MaxDateForSale,MaxEventDate) end EndDate
+,	(GrossSalesPUCommission - CancelledPreBillingPU - CancelledPosBilling + Noshow) Rol
+
+into #UnifiedDiscount
+
+from
+(
+	select
+		dr.UnifiedDiscountID
+	,	udis.ContractID
+	,	con.AccountID
+	,	mdis.MinDateForSale
+	,	mdis.MaxDateForSale
+	,	min(dr.EventDate) MinEventDate
+	,	max(dr.EventDate) MaxEventDate
+	,	sum(dr.GrossSalesPUCommission) GrossSalesPUCommission
+	,	sum(dr.CancelledPreBillingPU) CancelledPreBillingPU
+	,	sum(dr.CancelledPosBilling) CancelledPosBilling
+	,	sum(dr.Noshow) Noshow
+
+	from REPORTS.DiscountRevenue dr
+
+	left join ods.UnifiedDiscount udis
+	on dr.UnifiedDiscountID = udis.UnifiedDiscountID
+
+	left join REPORTS.Contract con
+	on udis.ContractID = con.ContractID
+
+	left join 
+	(
+		select
+			cast(min(DateForSale) as date) MinDateForSale
+		,	cast(max(DateForSale) as date) MaxDateForSale
+		,	UnifiedDiscountID
+
+		from ods.Discount
+
+		where IsPublic = 1
+		and cast(DateForSale as date) between '2010-03-31' and (select case when datepart(day,getdate()) = 1  then cast((dateadd(day, -1, cast(cast(datepart(year,getdate()) as varchar(4)) + '-' + cast(datepart(month,getdate()) as varchar(2)) + '-01' as date))) as date) else cast((select case when datepart(day,getdate()) = 1  then cast((dateadd(day, -1, cast(cast(datepart(year,getdate()) as varchar(4)) + '-' + cast(datepart(month,getdate()) as varchar(2)) + '-01' as date))) as date) else cast((dateadd(day, -1, cast(cast(datepart(year,dateadd(month, 1, getdate())) as varchar(4)) + '-' + cast(datepart(month,dateadd(month, 1, getdate())) as varchar(2)) + '-01' as date))) as date)  end ) as date)  end )
+
+		group by
+			UnifiedDiscountID
+			) mdis
+	on mdis.UnifiedDiscountID = dr.UnifiedDiscountID
+
+	where dr.EventDate <= (select case when datepart(day,getdate()) = 1  then cast((dateadd(day, -1, cast(cast(datepart(year,getdate()) as varchar(4)) + '-' + cast(datepart(month,getdate()) as varchar(2)) + '-01' as date))) as date) else cast((dateadd(day, -1, cast(cast(datepart(year,dateadd(month, 1, getdate())) as varchar(4)) + '-' + cast(datepart(month,dateadd(month, 1, getdate())) as varchar(2)) + '-01' as date))) as date)  end )
+	AND dr.GrossSales <> 0	
+	
+	group by
+		dr.UnifiedDiscountID
+	,	udis.ContractID
+	,	con.AccountID
+	,	mdis.MinDateForSale
+	,	mdis.MaxDateForSale
+	) x
+;
+commit;
+
+
+truncate table reports.AccountPublication;
+
+Insert into reports.AccountPublication
+select
+	ud.AccountID
+,	min(StartDate) FirstDateOn
+,	max(EndDate) LastDateOn
+,	case
+		when ud4.FirstDateOn > cast(dateadd(month, -3, (select case when datepart(day,getdate()) = 1  then cast((dateadd(day, -1, cast(cast(datepart(year,getdate()) as varchar(4)) + '-' + cast(datepart(month,getdate()) as varchar(2)) + '-01' as date))) as date) else cast((dateadd(day, -1, cast(cast(datepart(year,dateadd(month, 1, getdate())) as varchar(4)) + '-' + cast(datepart(month,dateadd(month, 1, getdate())) as varchar(2)) + '-01' as date))) as date)  end )) as date) then 'Ativação' 
+		when ud1.AccountID is not null and ud2.AccountID is null and ud3.AccountID is not null then 'Reativação'
+		else 'Republicação'
+	end AccountStatusPublication
+
+	from #UnifiedDiscount ud
+
+left join
+(
+	select distinct AccountID
+	from #UnifiedDiscount
+	where EndDate < cast(dateadd(month, -7, (select case when datepart(day,getdate()) = 1  then cast((dateadd(day, -1, cast(cast(datepart(year,getdate()) as varchar(4)) + '-' + cast(datepart(month,getdate()) as varchar(2)) + '-01' as date))) as date) else cast((dateadd(day, -1, cast(cast(datepart(year,dateadd(month, 1, getdate())) as varchar(4)) + '-' + cast(datepart(month,dateadd(month, 1, getdate())) as varchar(2)) + '-01' as date))) as date)  end )) as date) 
+	) ud1
+on ud.AccountID = ud1.AccountID
+
+left join
+(
+	select distinct AccountID
+	from #UnifiedDiscount
+	where EndDate between cast(dateadd(month, -7, (select case when datepart(day,getdate()) = 1  then cast((dateadd(day, -1, cast(cast(datepart(year,getdate()) as varchar(4)) + '-' + cast(datepart(month,getdate()) as varchar(2)) + '-01' as date))) as date) else cast((dateadd(day, -1, cast(cast(datepart(year,dateadd(month, 1, getdate())) as varchar(4)) + '-' + cast(datepart(month,dateadd(month, 1, getdate())) as varchar(2)) + '-01' as date))) as date)  end )) as date) and cast(dateadd(month, -2, (select case when datepart(day,getdate()) = 1  then cast((dateadd(day, -1, cast(cast(datepart(year,getdate()) as varchar(4)) + '-' + cast(datepart(month,getdate()) as varchar(2)) + '-01' as date))) as date) else cast((dateadd(day, -1, cast(cast(datepart(year,dateadd(month, 1, getdate())) as varchar(4)) + '-' + cast(datepart(month,dateadd(month, 1, getdate())) as varchar(2)) + '-01' as date))) as date)  end )) as date) 
+	) ud2
+on ud.AccountID = ud2.AccountID
+
+left join
+(
+	select distinct AccountID
+	from #UnifiedDiscount
+	where StartDate > cast(dateadd(month, -3, (select case when datepart(day,getdate()) = 1  then cast((dateadd(day, -1, cast(cast(datepart(year,getdate()) as varchar(4)) + '-' + cast(datepart(month,getdate()) as varchar(2)) + '-01' as date))) as date) else cast((dateadd(day, -1, cast(cast(datepart(year,dateadd(month, 1, getdate())) as varchar(4)) + '-' + cast(datepart(month,dateadd(month, 1, getdate())) as varchar(2)) + '-01' as date))) as date)  end )) as date) 
+	) ud3
+on ud.AccountID = ud3.AccountID
+
+left join
+(
+	select
+		AccountID
+	,	min(StartDate) FirstDateOn
+	
+	from #UnifiedDiscount
+	
+	group by
+		AccountID
+	) ud4
+on ud.AccountID = ud4.AccountID
+
+where EndDate <= (select case when datepart(day,getdate()) = 1  then cast((dateadd(day, -1, cast(cast(datepart(year,getdate()) as varchar(4)) + '-' + cast(datepart(month,getdate()) as varchar(2)) + '-01' as date))) as date) else cast((select case when datepart(day,getdate()) = 1  then cast((dateadd(day, -1, cast(cast(datepart(year,getdate()) as varchar(4)) + '-' + cast(datepart(month,getdate()) as varchar(2)) + '-01' as date))) as date) else cast((dateadd(day, -1, cast(cast(datepart(year,dateadd(month, 1, getdate())) as varchar(4)) + '-' + cast(datepart(month,dateadd(month, 1, getdate())) as varchar(2)) + '-01' as date))) as date)  end ) as date)  end )
+and ud.AccountID is not null
+group by
+	ud.AccountID
+,	case
+		when ud4.FirstDateOn > cast(dateadd(month, -3, (select case when datepart(day,getdate()) = 1  then cast((dateadd(day, -1, cast(cast(datepart(year,getdate()) as varchar(4)) + '-' + cast(datepart(month,getdate()) as varchar(2)) + '-01' as date))) as date) else cast((dateadd(day, -1, cast(cast(datepart(year,dateadd(month, 1, getdate())) as varchar(4)) + '-' + cast(datepart(month,dateadd(month, 1, getdate())) as varchar(2)) + '-01' as date))) as date)  end )) as date) then 'Ativação' 
+		when ud1.AccountID is not null and ud2.AccountID is null and ud3.AccountID is not null then 'Reativação'
+		else 'Republicação'
+	end
+
+;COMMIT

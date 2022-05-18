@@ -1,0 +1,1 @@
+grant all privileges on all tables in schema salesforce to group "bi_group";

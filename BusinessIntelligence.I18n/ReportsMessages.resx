@@ -1,0 +1,690 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <!-- 
+    Microsoft ResX Schema 
+    
+    Version 2.0
+    
+    The primary goals of this format is to allow a simple XML format 
+    that is mostly human readable. The generation and parsing of the 
+    various data types are done through the TypeConverter classes 
+    associated with the data types.
+    
+    Example:
+    
+    ... ado.net/XML headers & schema ...
+    <resheader name="resmimetype">text/microsoft-resx</resheader>
+    <resheader name="version">2.0</resheader>
+    <resheader name="reader">System.Resources.ResXResourceReader, System.Windows.Forms, ...</resheader>
+    <resheader name="writer">System.Resources.ResXResourceWriter, System.Windows.Forms, ...</resheader>
+    <data name="Name1"><value>this is my long string</value><comment>this is a comment</comment></data>
+    <data name="Color1" type="System.Drawing.Color, System.Drawing">Blue</data>
+    <data name="Bitmap1" mimetype="application/x-microsoft.net.object.binary.base64">
+        <value>[base64 mime encoded serialized .NET Framework object]</value>
+    </data>
+    <data name="Icon1" type="System.Drawing.Icon, System.Drawing" mimetype="application/x-microsoft.net.object.bytearray.base64">
+        <value>[base64 mime encoded string representing a byte array form of the .NET Framework object]</value>
+        <comment>This is a comment</comment>
+    </data>
+                
+    There are any number of "resheader" rows that contain simple 
+    name/value pairs.
+    
+    Each data row contains a name, and value. The row also contains a 
+    type or mimetype. Type corresponds to a .NET class that support 
+    text/value conversion through the TypeConverter architecture. 
+    Classes that don't support this are serialized and stored with the 
+    mimetype set.
+    
+    The mimetype is used for serialized objects, and tells the 
+    ResXResourceReader how to depersist the object. This is currently not 
+    extensible. For a given mimetype the value must be set accordingly:
+    
+    Note - application/x-microsoft.net.object.binary.base64 is the format 
+    that the ResXResourceWriter will generate, however the reader can 
+    read any of the formats listed below.
+    
+    mimetype: application/x-microsoft.net.object.binary.base64
+    value   : The object must be serialized with 
+            : System.Runtime.Serialization.Formatters.Binary.BinaryFormatter
+            : and then encoded with base64 encoding.
+    
+    mimetype: application/x-microsoft.net.object.soap.base64
+    value   : The object must be serialized with 
+            : System.Runtime.Serialization.Formatters.Soap.SoapFormatter
+            : and then encoded with base64 encoding.
+
+    mimetype: application/x-microsoft.net.object.bytearray.base64
+    value   : The object must be serialized into a byte array 
+            : using a System.ComponentModel.TypeConverter
+            : and then encoded with base64 encoding.
+    -->
+  <xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
+    <xsd:import namespace="http://www.w3.org/XML/1998/namespace" />
+    <xsd:element name="root" msdata:IsDataSet="true">
+      <xsd:complexType>
+        <xsd:choice maxOccurs="unbounded">
+          <xsd:element name="metadata">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" />
+              </xsd:sequence>
+              <xsd:attribute name="name" use="required" type="xsd:string" />
+              <xsd:attribute name="type" type="xsd:string" />
+              <xsd:attribute name="mimetype" type="xsd:string" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="assembly">
+            <xsd:complexType>
+              <xsd:attribute name="alias" type="xsd:string" />
+              <xsd:attribute name="name" type="xsd:string" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="data">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+                <xsd:element name="comment" type="xsd:string" minOccurs="0" msdata:Ordinal="2" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" msdata:Ordinal="1" />
+              <xsd:attribute name="type" type="xsd:string" msdata:Ordinal="3" />
+              <xsd:attribute name="mimetype" type="xsd:string" msdata:Ordinal="4" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="resheader">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" />
+            </xsd:complexType>
+          </xsd:element>
+        </xsd:choice>
+      </xsd:complexType>
+    </xsd:element>
+  </xsd:schema>
+  <resheader name="resmimetype">
+    <value>text/microsoft-resx</value>
+  </resheader>
+  <resheader name="version">
+    <value>2.0</value>
+  </resheader>
+  <resheader name="reader">
+    <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <resheader name="writer">
+    <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <data name="Language" xml:space="preserve">
+    <value>English</value>
+  </data>
+  <data name="DailySales" xml:space="preserve">
+    <value>Daily Sales</value>
+  </data>
+  <data name="KPI_Panel" xml:space="preserve">
+    <value>Indicators Panel</value>
+  </data>
+  <data name="User_Activity" xml:space="preserve">
+    <value>User Activity</value>
+  </data>
+  <data name="Home" xml:space="preserve">
+    <value>Home</value>
+  </data>
+  <data name="Subscribers" xml:space="preserve">
+    <value>Subscribers</value>
+  </data>
+  <data name="Reports" xml:space="preserve">
+    <value>Reports</value>
+  </data>
+  <data name="Dashboards" xml:space="preserve">
+    <value>Dashboards</value>
+  </data>
+  <data name="CountryName" xml:space="preserve">
+    <value>Country</value>
+  </data>
+  <data name="QTYSubscribers" xml:space="preserve">
+    <value>Subscribers</value>
+  </data>
+  <data name="QTYActivations" xml:space="preserve">
+    <value>Activations</value>
+  </data>
+  <data name="QTYDailyCustomers" xml:space="preserve">
+    <value>DailyCustomers</value>
+  </data>
+  <data name="QTYMonthlyCustomers" xml:space="preserve">
+    <value>Monthly Customers</value>
+  </data>
+  <data name="QTYReactivations" xml:space="preserve">
+    <value>Reactivations</value>
+  </data>
+  <data name="QTYHighActivity" xml:space="preserve">
+    <value>High Activity</value>
+  </data>
+  <data name="QTYLowActivity" xml:space="preserve">
+    <value>Low Activity</value>
+  </data>
+  <data name="QTYInactive" xml:space="preserve">
+    <value>Inactive</value>
+  </data>
+  <data name="QTYActivated" xml:space="preserve">
+    <value>Activated</value>
+  </data>
+  <data name="Growth_Active_Base" xml:space="preserve">
+    <value>Growth Active Base</value>
+  </data>
+  <data name="QTYInactivation" xml:space="preserve">
+    <value>Inactivation</value>
+  </data>
+  <data name="GrossSales" xml:space="preserve">
+    <value>Gross Sales</value>
+  </data>
+  <data name="QTYTransactions" xml:space="preserve">
+    <value>Transactions</value>
+  </data>
+  <data name="QTYCoupons" xml:space="preserve">
+    <value>Coupons</value>
+  </data>
+  <data name="Cupons_/_Transactions" xml:space="preserve">
+    <value>Coupons / Transactions</value>
+  </data>
+  <data name="CancelledPreBilling" xml:space="preserve">
+    <value>CancelledPreBilling</value>
+  </data>
+  <data name="Commision" xml:space="preserve">
+    <value>Commision</value>
+  </data>
+  <data name="GrossRevenue" xml:space="preserve">
+    <value>GrossRevenue</value>
+  </data>
+  <data name="CancelledPosBilling" xml:space="preserve">
+    <value>CancelledPosBilling</value>
+  </data>
+  <data name="Promocodes" xml:space="preserve">
+    <value>Promocodes</value>
+  </data>
+  <data name="NetSales" xml:space="preserve">
+    <value>Net Sales</value>
+  </data>
+  <data name="GrossSalesPUCommission" xml:space="preserve">
+    <value>Gross Sales PU Commission</value>
+  </data>
+  <data name="AmountToPartner" xml:space="preserve">
+    <value>Amount to Partner</value>
+  </data>
+  <data name="CategoryName" xml:space="preserve">
+    <value>Category</value>
+  </data>
+  <data name="EconomizedValue" xml:space="preserve">
+    <value>Economized Value</value>
+  </data>
+  <data name="RegionCountryName" xml:space="preserve">
+    <value>Region</value>
+  </data>
+  <data name="EventYear" xml:space="preserve">
+    <value>Event Year</value>
+  </data>
+  <data name="EventDate" xml:space="preserve">
+    <value>Event Date</value>
+  </data>
+  <data name="EventDay" xml:space="preserve">
+    <value>Event Day</value>
+  </data>
+  <data name="EventMonth" xml:space="preserve">
+    <value>Event Month1</value>
+  </data>
+  <data name="EventMonthTxt" xml:space="preserve">
+    <value>Event Month</value>
+  </data>
+  <data name="CityName" xml:space="preserve">
+    <value>City</value>
+  </data>
+  <data name="Brasil" xml:space="preserve">
+    <value>Brazil</value>
+  </data>
+  <data name="Argentina" xml:space="preserve">
+    <value>Argentina</value>
+  </data>
+  <data name="Chile" xml:space="preserve">
+    <value>Chile</value>
+  </data>
+  <data name="México" xml:space="preserve">
+    <value>Mexico</value>
+  </data>
+  <data name="Credits" xml:space="preserve">
+    <value>Credits</value>
+  </data>
+  <data name="Turismo" xml:space="preserve">
+    <value>Travel</value>
+  </data>
+  <data name="Beleza_e_Bem_estar" xml:space="preserve">
+    <value>Beauty</value>
+  </data>
+  <data name="Gastronomia" xml:space="preserve">
+    <value>Restaurants</value>
+  </data>
+  <data name="Entret_e_Lazer" xml:space="preserve">
+    <value>Entertainment</value>
+  </data>
+  <data name="Cursos_e_Aulas" xml:space="preserve">
+    <value>Class</value>
+  </data>
+  <data name="Fotografia" xml:space="preserve">
+    <value>Photo</value>
+  </data>
+  <data name="Automotivo" xml:space="preserve">
+    <value>Car Services</value>
+  </data>
+  <data name="Produtos" xml:space="preserve">
+    <value>Products</value>
+  </data>
+  <data name="Servicos" xml:space="preserve">
+    <value>Services</value>
+  </data>
+  <data name="jan" xml:space="preserve">
+    <value>jan</value>
+  </data>
+  <data name="fev" xml:space="preserve">
+    <value>feb</value>
+  </data>
+  <data name="mar" xml:space="preserve">
+    <value>mar</value>
+  </data>
+  <data name="abr" xml:space="preserve">
+    <value>apr</value>
+  </data>
+  <data name="mai" xml:space="preserve">
+    <value>mai</value>
+  </data>
+  <data name="jun" xml:space="preserve">
+    <value>jun</value>
+  </data>
+  <data name="jul" xml:space="preserve">
+    <value>jul</value>
+  </data>
+  <data name="ago" xml:space="preserve">
+    <value>aug</value>
+  </data>
+  <data name="set" xml:space="preserve">
+    <value>sep</value>
+  </data>
+  <data name="out" xml:space="preserve">
+    <value>oct</value>
+  </data>
+  <data name="nov" xml:space="preserve">
+    <value>nov</value>
+  </data>
+  <data name="dez" xml:space="preserve">
+    <value>dec</value>
+  </data>
+  <data name="TypeDayOfMonth" xml:space="preserve">
+    <value>Type Day of Month</value>
+  </data>
+  <data name="StatusDay" xml:space="preserve">
+    <value>Status Day</value>
+  </data>
+  <data name="StatusDate" xml:space="preserve">
+    <value>Status Date</value>
+  </data>
+  <data name="StatusYear" xml:space="preserve">
+    <value>Status Year</value>
+  </data>
+  <data name="NetRevenue" xml:space="preserve">
+    <value>Net Revenue</value>
+  </data>
+  <data name="LossesCancellation" xml:space="preserve">
+    <value>Losses Cancellation</value>
+  </data>
+  <data name="Orcamento" xml:space="preserve">
+    <value>Budget</value>
+  </data>
+  <data name="Orcado" xml:space="preserve">
+    <value>Budget</value>
+  </data>
+  <data name="Trimestre" xml:space="preserve">
+    <value>Quarter</value>
+  </data>
+  <data name="%Commission" xml:space="preserve">
+    <value>% Commission</value>
+  </data>
+  <data name="Achievement" xml:space="preserve">
+    <value>Achievement</value>
+  </data>
+  <data name="Accumulated_Month" xml:space="preserve">
+    <value>Accumulated Month</value>
+  </data>
+  <data name="Accumulated_Quarter" xml:space="preserve">
+    <value>Accumulated Quarter</value>
+  </data>
+  <data name="Realizado" xml:space="preserve">
+    <value>Real</value>
+  </data>
+  <data name="Refresh" xml:space="preserve">
+    <value>Refresh</value>
+  </data>
+  <data name="CancelledPreBillingPU" xml:space="preserve">
+    <value>Cancelled Pre Billing PU</value>
+  </data>
+  <data name="Realizado_abaixo_da_meta" xml:space="preserve">
+    <value>Real below target</value>
+  </data>
+  <data name="Realizado_acima_da_meta" xml:space="preserve">
+    <value>Real above target</value>
+  </data>
+  <data name="QTYNewCustomers" xml:space="preserve">
+    <value>New customers</value>
+  </data>
+  <data name="QTYOldCustomers" xml:space="preserve">
+    <value>Old Customers</value>
+  </data>
+  <data name="Customers" xml:space="preserve">
+    <value>Customers</value>
+  </data>
+  <data name="History" xml:space="preserve">
+    <value>History</value>
+  </data>
+  <data name="Mil" xml:space="preserve">
+    <value>Thousand</value>
+  </data>
+  <data name="GrossSales30Days" xml:space="preserve">
+    <value>Gross sales 30 days</value>
+  </data>
+  <data name="Cancelled" xml:space="preserve">
+    <value>Cancelled</value>
+  </data>
+  <data name="30_days" xml:space="preserve">
+    <value>30 days</value>
+  </data>
+  <data name="Yesterday" xml:space="preserve">
+    <value>Yesterday</value>
+  </data>
+  <data name="GrossSalesYesterday" xml:space="preserve">
+    <value>Gross sales yesterday</value>
+  </data>
+  <data name="AverageTicket" xml:space="preserve">
+    <value>Average ticket</value>
+  </data>
+  <data name="CancelledYesterday" xml:space="preserve">
+    <value>Cancelled yesterday</value>
+  </data>
+  <data name="Cancelled30Days" xml:space="preserve">
+    <value>Cancelled 30 Days</value>
+  </data>
+  <data name="Coupons30Days" xml:space="preserve">
+    <value>Coupons 30 days</value>
+  </data>
+  <data name="CouponsYesterday" xml:space="preserve">
+    <value>Coupons yesterday</value>
+  </data>
+  <data name="GrossRevenueYesterday" xml:space="preserve">
+    <value>Gross revenue yesterday</value>
+  </data>
+  <data name="GrossRevenue30Days" xml:space="preserve">
+    <value>Gross revenue 30 days</value>
+  </data>
+  <data name="TopDiscounts" xml:space="preserve">
+    <value>Top Deals</value>
+  </data>
+  <data name="QTYDiscounts" xml:space="preserve">
+    <value>Deals on line</value>
+  </data>
+  <data name="NewDiscount" xml:space="preserve">
+    <value>New Deals</value>
+  </data>
+  <data name="Duration" xml:space="preserve">
+    <value>Duration</value>
+  </data>
+  <data name="Market" xml:space="preserve">
+    <value>Market</value>
+  </data>
+  <data name="AverageCoupon" xml:space="preserve">
+    <value>Average Offered Coupon</value>
+  </data>
+  <data name="CompetitorName" xml:space="preserve">
+    <value>Competitor</value>
+  </data>
+  <data name="ShareDiscounts" xml:space="preserve">
+    <value>Deals share</value>
+  </data>
+  <data name="BaseStatus" xml:space="preserve">
+    <value>Base status</value>
+  </data>
+  <data name="Visits" xml:space="preserve">
+    <value>Visits</value>
+  </data>
+  <data name="ConversionRate" xml:space="preserve">
+    <value>Conversion rate</value>
+  </data>
+  <data name="Dictionary" xml:space="preserve">
+    <value>Dictionary</value>
+  </data>
+  <data name="DiscountClosed" xml:space="preserve">
+    <value>Deals Closed</value>
+  </data>
+  <data name="CityIsTop" xml:space="preserve">
+    <value>City is top</value>
+  </data>
+  <data name="CityIsActive" xml:space="preserve">
+    <value>City is active</value>
+  </data>
+  <data name="QTYOldCustomersMonth" xml:space="preserve">
+    <value>Old customers month</value>
+  </data>
+  <data name="QTYOldCustomersDay" xml:space="preserve">
+    <value>Old customers day</value>
+  </data>
+  <data name="1" xml:space="preserve">
+    <value>jan</value>
+  </data>
+  <data name="2" xml:space="preserve">
+    <value>feb</value>
+  </data>
+  <data name="3" xml:space="preserve">
+    <value>mar</value>
+  </data>
+  <data name="4" xml:space="preserve">
+    <value>apr</value>
+  </data>
+  <data name="5" xml:space="preserve">
+    <value>mai</value>
+  </data>
+  <data name="6" xml:space="preserve">
+    <value>jun</value>
+  </data>
+  <data name="7" xml:space="preserve">
+    <value>jul</value>
+  </data>
+  <data name="8" xml:space="preserve">
+    <value>aug</value>
+  </data>
+  <data name="9" xml:space="preserve">
+    <value>sep</value>
+  </data>
+  <data name="10" xml:space="preserve">
+    <value>oct</value>
+  </data>
+  <data name="11" xml:space="preserve">
+    <value>nov</value>
+  </data>
+  <data name="12" xml:space="preserve">
+    <value>dec</value>
+  </data>
+  <data name="Total" xml:space="preserve">
+    <value>tt</value>
+  </data>
+  <data name="T" xml:space="preserve">
+    <value>Total </value>
+  </data>
+  <data name="UpToD" xml:space="preserve">
+    <value>Up to D</value>
+  </data>
+  <data name="DurationClosed" xml:space="preserve">
+    <value>Duration deals closed</value>
+  </data>
+  <data name="DiscountOffLine" xml:space="preserve">
+    <value>Deals off line</value>
+  </data>
+  <data name="DealsPublication" xml:space="preserve">
+    <value>Deals Publication</value>
+  </data>
+  <data name="NEW!" xml:space="preserve">
+    <value>NEW!</value>
+  </data>
+  <data name="DealsClosedDt" xml:space="preserve">
+    <value>Detalhe das ofertas fechadas</value>
+  </data>
+  <data name="DealsOffLineDt" xml:space="preserve">
+    <value>Deals off line detail</value>
+  </data>
+  <data name="OffLineDate" xml:space="preserve">
+    <value>Off line date</value>
+  </data>
+  <data name="StartDate" xml:space="preserve">
+    <value>Start date</value>
+  </data>
+  <data name="EndDate" xml:space="preserve">
+    <value>Final date</value>
+  </data>
+  <data name="Deal" xml:space="preserve">
+    <value>Deal</value>
+  </data>
+  <data name="LossesAccrual" xml:space="preserve">
+    <value>LossesAccrual</value>
+  </data>
+  <data name="AverageSoldCoupon" xml:space="preserve">
+    <value>Average sold coupon</value>
+  </data>
+  <data name="$_for_visits" xml:space="preserve">
+    <value>$ for visit</value>
+  </data>
+  <data name="Sunday" xml:space="preserve">
+    <value>Sunday</value>
+  </data>
+  <data name="Monday" xml:space="preserve">
+    <value>Monday</value>
+  </data>
+  <data name="Tuesday" xml:space="preserve">
+    <value>Tuesday</value>
+  </data>
+  <data name="Wednesday" xml:space="preserve">
+    <value>Wednesday</value>
+  </data>
+  <data name="Thursday" xml:space="preserve">
+    <value>Thursday</value>
+  </data>
+  <data name="Friday" xml:space="preserve">
+    <value>Friday</value>
+  </data>
+  <data name="Saturday" xml:space="preserve">
+    <value>Saturday</value>
+  </data>
+  <data name="Fault_Map" xml:space="preserve">
+    <value>Fault Map</value>
+  </data>
+  <data name="in_10_minutes" xml:space="preserve">
+    <value>in 10 minutes</value>
+  </data>
+  <data name="DayOfWeek" xml:space="preserve">
+    <value>Day of week</value>
+  </data>
+  <data name="MarketingDeal" xml:space="preserve">
+    <value>Is marketing deal</value>
+  </data>
+  <data name="no" xml:space="preserve">
+    <value>no</value>
+  </data>
+  <data name="Cancellation" xml:space="preserve">
+    <value>Cancellation</value>
+  </data>
+  <data name="QTYTopDealNational" xml:space="preserve">
+    <value>Top deal national</value>
+  </data>
+  <data name="QTYTopDealRegional" xml:space="preserve">
+    <value>Top deal regional</value>
+  </data>
+  <data name="QTYTopDeals" xml:space="preserve">
+    <value>Top ofertas</value>
+  </data>
+  <data name="DealRepublication" xml:space="preserve">
+    <value>Deal republication</value>
+  </data>
+  <data name="PartnerRepublication" xml:space="preserve">
+    <value>Partner republication</value>
+  </data>
+  <data name="NewPartner" xml:space="preserve">
+    <value>New partner</value>
+  </data>
+  <data name="DealsRepublication" xml:space="preserve">
+    <value>Deals republication</value>
+  </data>
+  <data name="PartnerHighRescence" xml:space="preserve">
+    <value>Partner High Rescence</value>
+  </data>
+  <data name="PartnerMediumRescence" xml:space="preserve">
+    <value>Partner Medium Rescence</value>
+  </data>
+  <data name="PartnerLowRescence" xml:space="preserve">
+    <value>Partner Low Rescence</value>
+  </data>
+  <data name="PartnerIsTop" xml:space="preserve">
+    <value>Partner Is Top</value>
+  </data>
+  <data name="IsFirstDate" xml:space="preserve">
+    <value>Is first date</value>
+  </data>
+  <data name="PartnerType" xml:space="preserve">
+    <value>Partner type</value>
+  </data>
+  <data name="Others" xml:space="preserve">
+    <value>Others</value>
+  </data>
+  <data name="TotalGrossSales" xml:space="preserve">
+    <value>Total gross sales</value>
+  </data>
+  <data name="LastDealGrossSales" xml:space="preserve">
+    <value>Last deal gross sales</value>
+  </data>
+  <data name="High_rescence" xml:space="preserve">
+    <value>High rescence</value>
+  </data>
+  <data name="Medium_rescence" xml:space="preserve">
+    <value>Medium rescence</value>
+  </data>
+  <data name="Low_rescence" xml:space="preserve">
+    <value>Low rescence</value>
+  </data>
+  <data name="up_to_30_days" xml:space="preserve">
+    <value>up to 30 days</value>
+  </data>
+  <data name="between_31_and_180_days" xml:space="preserve">
+    <value>between 31 and 180 days</value>
+  </data>
+  <data name="more_than_180_days" xml:space="preserve">
+    <value>more than 180 days</value>
+  </data>
+  <data name="TopPartner" xml:space="preserve">
+    <value>Top partner</value>
+  </data>
+  <data name="Dashboard_NetRevenue" xml:space="preserve">
+    <value>Dashboard Net revenue</value>
+  </data>
+  <data name="AssuredPercentage" xml:space="preserve">
+    <value>AssuredPercentage</value>
+  </data>
+  <data name="IsPaymentSoldCoupons" xml:space="preserve">
+    <value>IsPaymentSoldCoupons</value>
+  </data>
+  <data name="PaymentCondition" xml:space="preserve">
+    <value>Payment condition</value>
+  </data>
+  <data name="CancelledPosAccounting" xml:space="preserve">
+    <value>Cancelled Pos Accounting</value>
+  </data>
+  <data name="ResultsByNoShowDate" xml:space="preserve">
+    <value>Results by no show date</value>
+  </data>
+  <data name="Financial" xml:space="preserve">
+    <value>Financeiro</value>
+  </data>
+</root>

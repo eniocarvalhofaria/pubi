@@ -1,0 +1,44 @@
+﻿sale.Purchaseid in (
+select purchaseid from stage.LogPromotionalCodeUse 
+where PromotionalCodeID in (
+	select  PromotionalCodeID from stage.PromotionalCode
+	where code in 
+(
+	'cineboizao'
+,	'cineokgrill'
+,	'cinesouthp'
+,	'cinemontev'
+,	'cinecamarao'
+,	'cineveredas'
+,	'cinebread'
+,	'cineviseu'
+,	'cineburger'
+,	'cinejaps'
+,	'cinegauchao'
+,	'cinedib'
+,	'cineliglig'
+,	'cinenakombi'
+,	'cineradial'
+,	'cinesushi'
+,	'cinefrango'
+,	'cinelivorno'
+,	'cinebraug'
+,	'cinejigs'
+,	'cineniwa'
+,	'cinenaoto'
+,	'cineoburg'
+,	'cineosaka'
+,	'cinehakka'
+,	'cinegendai'
+,	'cinegrill'
+,	'cinefloriano'
+,	'cinebec'
+,	'cinemasp'
+,	'cinemex'
+,	'cineangelica'
+,	'cineapplebees'
+,	'cinelevin'
+
+)
+							)
+)

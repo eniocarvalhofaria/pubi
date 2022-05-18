@@ -1,0 +1,149 @@
+﻿/*
+Script de exemplo dos comandos
+a chamada do programa deve conter:
+1 - connection
+	o nome da conexão. as opções válidas são: REDSHIFT, REPORTS, DW, EMAILDELIVERY, PEIXEURBANO
+
+	no caso de REDSHIFT também são necessários os parâmetros: userid e pwd
+
+2 - script
+	o nome do script existente contido no BusinessIntelligence\Scripts do repositório svn
+	pode se usar também o caminho completo de um arquivo
+
+3 - parametros
+	são os parametros que o script receberá
+
+Exemplo de argumentos na linha de comando:
+
+--connection REDSHIFT --userid enio.faria --pwd xxxxxx --script Teste --parameters forceexecution=0;parametro2=conteudo
+
+os comandos devem ser separados por ;
+
+ todos os comandos que o database aceitar são permitidos */
+
+create table #tabela0
+(
+	field1 int,
+	field2 date
+)
+;
+/*
+O comando set deve conter uma instrução sql que retorne apenas uma linha. 
+Automaticamente serão criadas variáveis com os nomes dos campos retornados
+*/
+
+set
+ select 
+	max(EventDate) maxdate
+,	max(EventDate - interval '7 day') mindate
+,	to_char(max(EventDate), 'yyyyMMdd') maxdateformatted
+ from reports.Discountrevenue
+ ;
+
+ /*
+Todas as variáveis do script devem ser envoltas por <@variavel@>  podendo ser usadas como parâmetros ou como nomes de objetos.
+No caso de nomes de objetos devem ser envoltos por <@@variavel@>
+ 
+*/
+
+
+update #tabela0 set field1 = 0 where field2 =  date <@MaxDate@>;
+
+
+ create table #tabela_eventos_<@@maxdateformatted@>
+ ( field1 int)
+ ;
+
+/* o comando print imprime uma mensagem na tela */
+print ('O conteudo de forceexecution é: ' + '<@forceexecution@>');
+print ('O conteudo de parametro2 é: ' + '<@parametro2@>');
+
+/*Os comandos showlog; e hidelog; servem pra desabilitar a escrita dos sqls no log */
+
+hidelog;
+ /* o comando while funciona semelhante ao que encontramos no C# */
+
+ while ( <@mindate@> < <@maxdate@>)
+ {
+
+ -- No exemplo abaixo estamos incrementando 1 dia à variável mindate
+		set select date <@mindate@> + interval '1 day' mindate
+ }
+
+ showlog;
+ /* todos os comandos com sub blocos de execução englobados por { } (while,if,cursor) aceitam o comando break; como fuga da execução do bloco */
+ while (0 < 1)
+ {
+ 	break;
+ }
+
+/* o comando if é semelhante ao C# aceitando else, mas não aceita else if. A expressão lógica deve ser uma expressão válida para o Database */
+
+ if(extract(day from now()) = 1)
+ {
+  /* o comando return; pode ser usado em qualquer parte do script. Isto resultará na interrupção da execução do script*/
+
+	return;
+ }
+ else
+ {
+
+
+	create table #tabela1
+	(
+		pageId int
+	);
+
+		create table #tabela2
+	(
+		pageId int,
+		pageName varchar(100)
+	);
+
+	insert into #tabela2 values (1,'Rio de Janeiro');
+	insert into #tabela2 values (2,'São Paulo');
+    insert into #tabela2 values (3,'Belo Horizonte');
+
+	create table #tabela3
+	(
+		pageid int,
+		pagename varchar(100)
+	);
+
+	/* o comando cursor fornece uma maneira de interagir com cada linha retornada por um sql */
+
+	
+	cursor c1 select * from #tabela2 order by PageId
+	{
+		if(<@c1.pagename@> like 'Rio de Janeiro%')
+		{
+			insert into #tabela1 values (<@c1.pageid@>);
+		}else
+		{
+			insert into #tabela3 values (<@c1.pageid@>,<@c1.pagename@>);
+		}
+	}
+ }
+
+ /* o comando try serve para que sql que não execute com sucesso possa ser interceptado, neste caso entra no bloco catch */
+
+ try{
+ select 1/0;
+ }
+ catch{
+ print ('aconteceu um erro com codigo de erro: ' + cast(<@errorcode@> as varchar(100)) + ' e mensagem: ' + <@errormessage@> );
+ }
+print ('Processo finalizado com sucesso');
+
+/* qualquer comando pode precedido da informacao de conexao para uma execucao em outro banco*/
+
+connection PROCESSCONTROL 
+set
+select max(cast(LastDateTimeAvailable as date)) LastDate 
+from  REPORTS.dbo.ExecutionControl nolock
+where processname like '%UnifiedDiscountScheduling%'
+and ReturnCode = 0
+
+/* a variavel <@recordsAffected@> eh utilizada pra pegar a quantidade de registros afetados por uma operação de insert, delete ou update*/
+
+select <@recordsAffected@> registrosAfetados into #tabelaqualquer

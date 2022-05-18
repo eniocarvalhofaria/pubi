@@ -1,0 +1,29 @@
+﻿<table class="tblanguages">
+    <tr class="trflags">
+        <td class="brazilflag">
+            <a class="pt-br"  href="javascript:void(0);">
+                <img src="../Content/Images/Brazil-Flag-icon-pp.png" border="0" width="44" height="30"
+                    alt="Português" style="color: #ff6600; font-family: 'Trebuchet MS', Arial, Helvetica;
+                    font-size: 18px; font-weight: bold; text-decoration: none;" />
+            </a>
+        </td>
+        <td class="usaflag">
+            <a class="en-us" href= "javascript:void(0);">
+                <img src="../Content/Images/United-States-Flag-icon-pp.png" border="0" width="44" height="30"
+                    alt="English" style="color: #ff6600; font-family: 'Trebuchet MS', Arial, Helvetica;
+                    font-size: 18px; font-weight: bold; text-decoration: none;" />
+            </a>
+        </td>
+    </tr>
+    <tr>
+        <td class="tdlanguage" colspan="2" align="right" valign="top" >
+            @BusinessIntelligence.I18n.Messages.Language
+        </td>
+    </tr>
+</table>
+<script type="text/javascript"> 
+    var url = "/Language/SelectPortuguese";
+    $.get(url, null, function (data) {
+        $("#getDateTimeString").html(data);
+    })
+</script>

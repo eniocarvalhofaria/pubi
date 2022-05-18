@@ -1,0 +1,42 @@
+drop table if exists #UserAccountUrl;commit;
+
+select
+	u.UserAccountID
+,	case
+		when CHARINDEX('%',u.LandingPageUrl) > 0
+		then replace(replace(replace(u.LandingPageUrl,'%3D','='),'%26','&'),'%20','_')
+		else u.LandingPageUrl
+	end LandingPageUrl
+,	u.DateRegistered
+into #UserAccountUrl
+
+from ods.UserAccount u
+left join REPORTS.UserAccountUrl uu
+on u.UserAccountID = uu.UserAccountID
+where uu.UserAccountID is null
+; 
+commit;
+
+insert into REPORTS.UserAccountUrl
+select 
+	u.UserAccountID
+,	case
+		when CHARINDEX('/android/',u.LandingPageUrl) > 0 or CHARINDEX('/ios/',u.LandingPageUrl) > 0 or CHARINDEX('/bb/',u.LandingPageUrl) > 0 then 'Mobile'
+		else 'Web'
+	end Origin
+,	case
+		when CHARINDEX('/android/',u.LandingPageUrl) > 0 then 'Android'
+		when CHARINDEX('/ios/',u.LandingPageUrl) > 0 then 'Iphone'
+		when CHARINDEX('/bb/',u.LandingPageUrl) > 0 then 'BlackBerry'
+		else 'Outros'
+	 end "Path"
+,	cast(u.DateRegistered as date) DateRegistered
+,	LEFT(REGEXP_SUBSTR(landingpageurl, '[^/]+\\.[^/:]+'), 255) SiteLandingPageUrl
+,	LEFT (NULLIF(REGEXP_SUBSTR (REGEXP_SUBSTR (landingpageurl,'utm_source=[^&]*'),'[^=]*$'),''),255) UtmSourceLandingPageUrl
+,	LEFT (NULLIF(REGEXP_SUBSTR (REGEXP_SUBSTR (landingpageurl,'utm_medium=[^&]*'),'[^=]*$'),''),255) UtmMediumLandingPageUrl
+,	LEFT (NULLIF(REGEXP_SUBSTR (REGEXP_SUBSTR (landingpageurl,'utm_campaign=[^&]*'),'[^=]*$'),''),255) UtmCampaignLandingPageUrl
+,	LEFT (NULLIF(REGEXP_SUBSTR (REGEXP_SUBSTR (landingpageurl,'utm_content=[^&]*'),'[^=]*$'),''),255) UtmContentLandingPageUrl
+,	LEFT (NULLIF(REGEXP_SUBSTR (REGEXP_SUBSTR (landingpageurl,'utm_term=[^&]*'),'[^=]*$'),''),255) UtmTermLandingPageUrl
+from #UserAccountUrl u
+;
+commit

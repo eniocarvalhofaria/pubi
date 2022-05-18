@@ -1,0 +1,18 @@
+﻿
+insert into dbo.MailingUserAccount
+(	UserAccountID
+,	MailingUserTypeId
+,	CampaignId
+)
+select
+	UserAccountID
+,	case when (UserAccountId + <@RandomNumber@>) % 100 between 0 and <@finalMod@> then 2 else 1 end MailingUserTypeId
+,	<@CampaignId@> CampaignId
+from #MailingSelection
+where 
+(
+(UserAccountId + <@RandomNumber@>) % 100 between 0 and <@finalMod@>
+or 
+<@CampaignWhere@>
+)
+and <@NotSemeados@>

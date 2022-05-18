@@ -1,0 +1,140 @@
+drop table if exists #UrlsTemp
+;
+
+delete from reports.purchaseurl where purchaseid in (select purchaseid from reports.purchaseUrl B group by 1 having count(*) > 1);
+;
+select
+	s.PurchaseID
+,	s.SourceID
+,	case
+		when CHARINDEX('push:{',s.LandingPageUrl) > 0 or
+			s.LandingPageUrl = 'push' 
+		then 'https://www.peixeurbano.com.br/?utm_source=push&utm_medium=push'
+		when CHARINDEX('%',s.LandingPageUrl) > 0
+		then replace(replace(replace(s.LandingPageUrl,'%3D','='),'%26','&'),'%20','_')
+		else s.LandingPageUrl
+	end LandingPageUrl
+,	case
+		when CHARINDEX('%',s.HttpReferrer) > 0
+		then replace(replace(replace(s.HttpReferrer,'%3D','='),'%26','&'),'%20','_')
+		else s.HttpReferrer
+	end  HttpReferrer
+
+into #UrlsTemp
+
+from ods.Purchase s
+
+left join REPORTS.PurchaseUrl pu
+on s.PurchaseID = pu.PurchaseID
+
+where  pu.PurchaseID is null
+;
+
+
+drop table if exists #PurchaseUrl;
+
+
+
+select --top 1000
+	s.PurchaseID
+,	case
+		when
+			CHARINDEX('Mobile: (OS: android',s.LandingPageUrl) > 0 or
+			CHARINDEX('/android/',s.LandingPageUrl) > 0 or
+			CHARINDEX('Mobile: (OS: ios',s.LandingPageUrl) > 0 or
+			CHARINDEX('/ios/',s.LandingPageUrl) > 0 or
+			CHARINDEX('/bb/',s.LandingPageUrl) > 0 or
+			CHARINDEX('Mobile: (OS: android',s.HttpReferrer) > 0 or
+			CHARINDEX('/android/',s.HttpReferrer) > 0 or
+			CHARINDEX('Mobile: (OS: ios',s.HttpReferrer) > 0 or
+			CHARINDEX('/ios/',s.HttpReferrer) > 0 or
+			CHARINDEX('utm_source=push',s.LandingPageUrl) > 0 or 
+			SourceId in (2,3)
+
+			then 'Mobile'
+		else 'Web'
+	end Origin
+,	case
+		when
+			CHARINDEX('/android/',s.LandingPageUrl) > 0 or
+			CHARINDEX('Mobile: (OS: android',s.LandingPageUrl) > 0
+		then 'Android'
+		when
+			CHARINDEX('/ios/',s.LandingPageUrl) > 0 or
+			CHARINDEX('Mobile: (OS: ios',s.LandingPageUrl) > 0
+		then 'Iphone'
+		when
+			CHARINDEX('/bb/',s.LandingPageUrl) > 0
+		then 'BlackBerry'
+		when
+			CHARINDEX('/android/',s.HttpReferrer) > 0 or
+			CHARINDEX('Mobile: (OS: android',s.HttpReferrer) > 0
+		then 'Android'
+		when
+			CHARINDEX('/ios/',s.HttpReferrer) > 0 or
+			CHARINDEX('Mobile: (OS: ios',s.HttpReferrer) > 0
+		then 'Iphone'
+		else 'Outros'
+	 end "Path"
+,	cast(LEFT(REGEXP_SUBSTR(landingpageurl, '[^/]+\\.[^/:]+'), 255)  as varchar(255)) SiteLandingPageUrl
+,	cast(LEFT (NULLIF(REGEXP_SUBSTR (REGEXP_SUBSTR (landingpageurl,'utm_source=[^&]*'),'[^=]*$'),''),255) as varchar(255)) UtmSourceLandingPageUrl
+,	cast(LEFT (NULLIF(REGEXP_SUBSTR (REGEXP_SUBSTR (landingpageurl,'utm_medium=[^&]*'),'[^=]*$'),''),255) as varchar(255))  UtmMediumLandingPageUrl
+,	cast(LEFT (NULLIF(REGEXP_SUBSTR (REGEXP_SUBSTR (landingpageurl,'utm_campaign=[^&]*'),'[^=]*$'),''),255) as varchar(255))  UtmCampaignLandingPageUrl
+,	cast(LEFT (NULLIF(REGEXP_SUBSTR (REGEXP_SUBSTR (landingpageurl,'utm_content=[^&]*'),'[^=]*$'),''),255) as varchar(255))  UtmContentLandingPageUrl
+,	cast(LEFT (NULLIF(REGEXP_SUBSTR (REGEXP_SUBSTR (landingpageurl,'utm_term=[^&]*'),'[^=]*$'),''),255) as varchar(255))  UtmTermLandingPageUrl
+,	cast(LEFT(REGEXP_SUBSTR(s.HttpReferrer, '[^/]+\\.[^/:]+'),255)  as varchar(255)) SiteHttpReferrer
+,	cast(LEFT (NULLIF(REGEXP_SUBSTR (REGEXP_SUBSTR (s.HttpReferrer,'utm_source=[^&]*'),'[^=]*$'),''),255)  as varchar(255)) UtmSourceHttpReferrer
+,	cast(LEFT (NULLIF(REGEXP_SUBSTR (REGEXP_SUBSTR (s.HttpReferrer,'utm_medium=[^&]*'),'[^=]*$'),''),255)  as varchar(255)) UtmMediumHttpReferrer
+,	cast(LEFT (NULLIF(REGEXP_SUBSTR (REGEXP_SUBSTR (s.HttpReferrer,'utm_campaign=[^&]*'),'[^=]*$'),''),255)  as varchar(255)) UtmCampaignHttpReferrer
+,	cast(LEFT (NULLIF(REGEXP_SUBSTR (REGEXP_SUBSTR (s.HttpReferrer,'utm_content=[^&]*'),'[^=]*$'),''),255)  as varchar(255)) UtmContentHttpReferrer
+,	cast(LEFT (NULLIF(REGEXP_SUBSTR (REGEXP_SUBSTR (s.HttpReferrer,'utm_term=[^&]*'),'[^=]*$'),''),255)  as varchar(255)) UtmTermHttpReferrer
+,	case 
+		when landingpageurl ilike '%utm_source=googleshopping%' then 13
+		when landingpageurl ilike '%source=mcmagazine%' then 14
+		when landingpageurl ilike '%gclid%' then 7
+		when landingpageurl ilike '%utm_source=google%' AND landingpageurl ilike '%utm_medium=cpc%' then 7
+		when landingpageurl ilike '%utm_source=googleadwords_int%' then 7
+		when landingpageurl ilike '%utm_source=facebookads%' and landingpageurl ilike '%utm_campaign=%geolocation%' then 15
+		when landingpageurl ilike '%utm_source=facebookads%' then 6
+		when landingpageurl ilike '%utm_source=criteo%' AND landingpageurl ilike '%utm_medium=rmkt%' then 4
+		when landingpageurl ilike '%utm_source=saveme%' then 10
+		when landingpageurl ilike '%utm_source=lomadee%' and landingpageurl ilike '%utm_campaign=22463985%' then 10
+		when landingpageurl ilike '%utm_source=lomadee%' and landingpageurl ilike '%utm_campaign=22550778%' then 16
+	
+		when landingpageurl ilike '%utm_source=lomadee%' and landingpageurl ilike '%utm_campaign=22664040%' then 23
+		when landingpageurl ilike '%utm_source=lomadee%' and landingpageurl ilike '%utm_campaign=22673621%' then 24
+		when landingpageurl ilike '%utm_source=lomadee%' and landingpageurl ilike '%utm_campaign=22246615%' then 25
+		when landingpageurl ilike '%utm_source=lomadee%' and landingpageurl ilike '%utm_campaign=22677868%' then 26
+		when landingpageurl ilike '%utm_source=lomadee%' and landingpageurl ilike '%utm_campaign=22671237%' then 27
+		when landingpageurl ilike '%utm_source=lomadee%' and landingpageurl ilike '%utm_campaign=22602924%' then 28
+		when landingpageurl ilike '%utm_source=buscape%' then 3
+		when landingpageurl ilike '%utm_source=bing%' AND landingpageurl ilike '%utm_medium=cpc%' then 2
+		when landingpageurl ilike '%utm_source=soclminer%' then 11
+		when landingpageurl ilike '%utm_source=microsoft%' then 12
+		when landingpageurl ilike '%utm_medium=afiliado%' then 1
+		when landingpageurl ilike '%utm_medium=email%' then 5
+		when landingpageurl ilike '%utm_medium=mail%' then 5		
+		when landingpageurl ilike '%utm_source=share-to-win%' then 8
+		when landingpageurl ilike '%utm_source=banner%' then 8
+		when landingpageurl ilike '%utm_source=thankyoupage%' then 8
+		
+		when landingpageurl ilike '%utm_source=fortaleza%' then 17
+		when landingpageurl ilike '%utm_source=valejunto%' then 18
+		when landingpageurl ilike '%utm_source=superaremidia%' then 19
+		when landingpageurl ilike '%utm_source=facebookOrg%' then 20
+		when landingpageurl ilike '%utm_source=applift%' then 30
+		when landingpageurl ilike '%utm_source=appliftcustom_int%' then 30
+		when landingpageurl ilike '%glispa%' then 29
+		when landingpageurl ilike '%utm_source=meucupom%' AND landingpageurl ilike '%utm_medium=parcerias%' then 22
+		when landingpageurl ilike '%utm_source=push%' then 21
+		when landingpageurl ilike '%utm_medium%' then 9
+		else  8
+	end	mktSourceId
+into #PurchaseUrl
+from #UrlsTemp s
+
+;
+
+insert into REPORTS.PurchaseUrl
+select * from #PurchaseUrl
+;

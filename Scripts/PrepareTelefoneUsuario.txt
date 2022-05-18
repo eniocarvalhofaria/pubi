@@ -1,0 +1,298 @@
+drop table if exists telefone;
+create temporary table telefone(
+useraccountid integer,
+telefone varchar(50),
+"data" timestamp,
+CPF varchar(20),
+Cartao varchar(30),
+IP varchar(50)
+)
+diststyle key
+distkey (useraccountid)
+sortkey (useraccountid);
+
+drop table if exists telefonepurchase;
+create temporary table telefonepurchase (
+	purchaseid int4,
+	purchaseruseraccountid int4,
+	purchaseinitiated timestamp,
+	deviceinstallid varchar(36),
+	facebookuserid varchar(56)
+)
+diststyle key
+distkey (purchaseid)
+sortkey (purchaseid);
+
+ insert into telefonepurchase(purchaseid,purchaseruseraccountid,purchaseinitiated,deviceinstallid,facebookuserid)
+ select p.purchaseid
+ 		,p.purchaseruseraccountid
+ 		,p.purchaseinitiated 
+ 		,p.deviceinstallid
+ 		,uafc.facebookuserid
+ from ods.purchase p
+ LEFT JOIN stage.useraccountfacebookconnect uafc ON (uafc.useraccountid = p.purchaseruseraccountid)
+ where p.purchaseinitiated::DATE >= (GETDATE()-7)::DATE;
+ 
+ 
+drop table if exists paymentantifraudhistory;
+create temporary table paymentantifraudhistory (
+	purchaseid int4,
+	paymentantifraudhistoryid int4,
+	paymentantifraudclassid int2,
+	useraccountid int4,
+	purchaseinitiated timestamp,
+	cardnumber varchar(45)
+)
+diststyle key
+distkey (paymentantifraudhistoryid)
+sortkey (paymentantifraudhistoryid);
+
+insert into paymentantifraudhistory (purchaseid,paymentantifraudhistoryid,paymentantifraudclassid, useraccountid,purchaseinitiated,cardnumber)
+ select distinct ppd.internalreferencenumber purchaseid, pah.paymentantifraudhistoryid, pa.paymentantifraudclassid,p.purchaseruseraccountid as useraccountid, p.purchaseinitiated,ppd.cardnumber
+ from ods.paymentantifraudhistory pah
+  inner join ods.paymentantifraud pa
+  on pa.paymentantifraudid = pah.paymentantifraudid --and pa.paymentantifraudclassid = 8
+  inner join ods.purchasepaymentdata ppd
+  on ppd.purchasepaymentdataid = pa.purchasepaymentdataid
+  inner join telefonepurchase p
+  on p.purchaseid = ppd.internalreferencenumber
+ where pah.datasend <> '';
+	
+drop table if exists #paymentantifraudhistory_datasend;
+ select distinct pah.paymentantifraudhistoryid,pah.datasend,pah."date" "data" into #paymentantifraudhistory_datasend
+ from paymentantifraudhistory paht
+ 	inner join ods.paymentantifraudhistory pah on pah.paymentantifraudhistoryid = paht.paymentantifraudhistoryid;
+
+drop table if exists paymentantifraudhistory_telefone;
+create temporary table paymentantifraudhistory_telefone (
+	ddd varchar(10),
+	telefone varchar(20),
+	CPF varchar(20),
+	IP varchar(50),
+	Cartao varchar(45),
+	purchaseid int4,
+	useraccountid int4,
+	"data" timestamp
+)
+diststyle key
+distkey (purchaseid)
+sortkey (purchaseid);
+
+ insert into paymentantifraudhistory_telefone (ddd,telefone,CPF,IP,Cartao,purchaseid,useraccountid,"data")
+ select distinct
+ 		 --COALESCE((left(replace(regexp_substr(pah.datasend,'<billingNumber>[A-Za-z0-9.:/-]*'),'<billingNumber>',''),2)),(replace(regexp_substr(pah.datasend,'<_document_ClearSale_Orders_Order_CollectionData_Phones_Phone_DDD>[A-Za-z0-9.:/-]*'),'<_document_ClearSale_Orders_Order_CollectionData_Phones_Phone_DDD>',''))) as DDD
+		--,COALESCE((right(replace(regexp_substr(pah.datasend,'<billingNumber>[A-Za-z0-9.:/-]*'),'<billingNumber>',''),9)),(replace(regexp_substr(pah.datasend,'<_document_ClearSale_Orders_Order_CollectionData_Phones_Phone_Number>[A-Za-z0-9.:/-]*'),'<_document_ClearSale_Orders_Order_CollectionData_Phones_Phone_Number>',''))) as TELEFONE
+		--,COALESCE((replace(regexp_substr(pah.datasend,'<billingCPF>[A-Za-z0-9.:/-]*'),'<billingCPF>','')),(replace(regexp_substr(pah.datasend,'<_document_ClearSale_Orders_Order_CollectionData_LegalDocument1>[A-Za-z0-9.:/-]*'),'<_document_ClearSale_Orders_Order_CollectionData_LegalDocument1>',''))) as CPF
+		--,COALESCE((replace(regexp_substr(pah.datasend,'<ipAddress>[A-Za-z0-9.:/-]*'),'<ipAddress>','')),(replace(regexp_substr(pah.datasend,'<_document_ClearSale_Orders_Order_IP>[A-Za-z0-9.:/-]*'),'<_document_ClearSale_Orders_Order_IP>',''))) as IP
+		  (case 
+				when left(replace(regexp_substr(pah.datasend,'<billingNumber>[A-Za-z0-9.:/-]*'),'<billingNumber>',''),2) <> '' then left(replace(regexp_substr(pah.datasend,'<billingNumber>[A-Za-z0-9.:/-]*'),'<billingNumber>',''),2)
+				when (replace(regexp_substr(pah.datasend,'<_document_ClearSale_Orders_Order_CollectionData_Phones_Phone_DDD>[A-Za-z0-9– . –]*'),'<_document_ClearSale_Orders_Order_CollectionData_Phones_Phone_DDD>','')) <> '' then (replace(regexp_substr(pah.datasend,'<_document_ClearSale_Orders_Order_CollectionData_Phones_Phone_DDD>[A-Za-z0-9– . –]*'),'<_document_ClearSale_Orders_Order_CollectionData_Phones_Phone_DDD>',''))
+				else left(replace(regexp_substr(pah.datasend,'<_document_RequestScore_Telephone>[A-Za-z0-9– . –]*'),'<_document_RequestScore_Telephone>',''),2) end 
+		  ) as DDD
+		, (case
+				when right(replace(regexp_substr(pah.datasend,'<billingNumber>[A-Za-z0-9.:/-]*'),'<billingNumber>',''),9) <> '' then right(replace(regexp_substr(pah.datasend,'<billingNumber>[A-Za-z0-9.:/-]*'),'<billingNumber>',''),9) 
+				when (replace(regexp_substr(pah.datasend,'<_document_ClearSale_Orders_Order_CollectionData_Phones_Phone_Number>[A-Za-z0-9– . –]*'),'<_document_ClearSale_Orders_Order_CollectionData_Phones_Phone_Number>','')) <> '' then (replace(regexp_substr(pah.datasend,'<_document_ClearSale_Orders_Order_CollectionData_Phones_Phone_Number>[A-Za-z0-9– . –]*'),'<_document_ClearSale_Orders_Order_CollectionData_Phones_Phone_Number>',''))
+				else right(replace(regexp_substr(pah.datasend,'<_document_RequestScore_Telephone>[A-Za-z0-9– . –]*'),'<_document_RequestScore_Telephone>',''),9) end 
+		   ) as TELEFONE
+		, (case
+				when replace(regexp_substr(pah.datasend,'<billingCPF>[A-Za-z0-9.:/-]*'),'<billingCPF>','') = '' then (replace(regexp_substr(pah.datasend,'<_document_ClearSale_Orders_Order_CollectionData_LegalDocument1>[A-Za-z0-9.:/-]*'),'<_document_ClearSale_Orders_Order_CollectionData_LegalDocument1>',''))
+				else replace(regexp_substr(pah.datasend,'<billingCPF>[A-Za-z0-9.:/-]*'),'<billingCPF>','') end
+		   ) as CPF
+		, (case
+				when replace(regexp_substr(pah.datasend,'<ipAddress>[A-Za-z0-9.:/-]*'),'<ipAddress>','') = '' then (replace(regexp_substr(pah.datasend,'<_document_ClearSale_Orders_Order_IP>[A-Za-z0-9.:/-]*'),'<_document_ClearSale_Orders_Order_IP>',''))
+				else replace(regexp_substr(pah.datasend,'<ipAddress>[A-Za-z0-9.:/-]*'),'<ipAddress>','') end 
+		   ) as IP				
+ 		,paht.cardnumber as Cartao
+		,paht.purchaseid
+		,paht.useraccountid
+		,pah."data" "data"
+from paymentantifraudhistory paht
+ 	inner join #paymentantifraudhistory_datasend pah on pah.paymentantifraudhistoryid = paht.paymentantifraudhistoryid;
+
+drop table if exists #paymentantifraudhistory_datasend;
+drop table if exists paymentantifraudhistory;
+
+insert into telefone(
+useraccountid,
+telefone,
+"data",
+CPF,
+Cartao,
+IP
+)
+select useraccountid
+		,trim(regexp_replace(ddd + telefone, '[^0-9a-zA-Z]+')) as telefone
+		,max("data") "data"
+		,max(CPF) CPF
+		,max(Cartao) Cartao
+		,max(IP) IP
+from paymentantifraudhistory_telefone t
+ where len(trim(regexp_replace(coalesce(telefone,''), '[^0-9a-zA-Z]+'))) > 8
+ group by 1, 2;
+
+ drop table if exists paymentantifraudhistory_telefone;
+ 
+drop table if exists telefone_aux;
+create temporary table telefone_aux(
+useraccountid integer,
+telefoneAntiFraud varchar(50),
+telefoneAntiFraud_date timestamp,
+telefoneTicket varchar(50),
+telefoneTicket_date timestamp,
+telefoneLegado varchar(50),
+telefoneLegado_date timestamp,
+telefoneEntrega varchar(50),
+telefoneEntrega_date timestamp,
+CPF varchar(20),
+Cartao varchar(30),
+IP varchar(50),
+deviceinstallid varchar(36),
+facebookuserid varchar(56)
+)
+diststyle key
+distkey (useraccountid)
+sortkey (useraccountid);
+
+
+drop table if exists #ost_ticket;
+SELECT "max" (ost_ticket.closed) AS data
+			, ost_ticket.email
+			into #ost_ticket
+		FROM ods.ost_ticket
+		WHERE ((ost_ticket.email)::TEXT <> (' '::VARCHAR)::TEXT)
+		GROUP BY ost_ticket.email;
+		
+drop table if exists #ost_ticket_final;
+select	m.email
+			,m.phone
+			,m.NAME
+			,m.created 
+	into #ost_ticket_final
+	FROM ods.ost_ticket m
+	INNER JOIN #ost_ticket h ON m.closed = h.data
+		AND (m.email)::TEXT = (h.email)::TEXT;
+
+drop table if exists #ost_ticket;
+
+insert into telefone_aux(useraccountid,telefoneAntiFraud,telefoneAntiFraud_date,telefoneTicket
+,telefoneTicket_date,telefoneLegado,telefoneLegado_date,telefoneEntrega,telefoneEntrega_date,CPF,Cartao,IP
+,deviceinstallid,facebookuserid)
+SELECT 	p.purchaseruseraccountid AS useraccountid
+		,ty.telefone AS telefoneAntiFraud
+		,ty."data" as telefoneAntiFraud_date 
+		,trim(regexp_replace(y.phone, '[^0-9a-zA-Z]+')) AS telefoneTicket
+		,max(y.created) as telefoneTicket_date 
+		,trim(regexp_replace(ua.cellphone, '[^0-9a-zA-Z]+')) AS telefoneLegado
+		,max(ua.dateregistered) as telefoneLegado_date			 
+		,trim(regexp_replace(r.phonenumber, '[^0-9a-zA-Z]+')) AS telefoneEntrega
+		,max(p.purchaseinitiated) as telefoneEntrega_date
+		,max(ty.CPF) CPF
+		,max(ty.Cartao) Cartao
+		,max(ty.IP) IP
+		,p.deviceinstallid
+		,p.facebookuserid
+FROM telefonepurchase p
+LEFT JOIN ods.useraccount ua ON ((ua.useraccountid = p.purchaseruseraccountid))
+LEFT JOIN #ost_ticket_final y ON ((y.email)::TEXT = (ua.emailaddress)::TEXT)
+LEFT JOIN telefone ty 	ON ((ty.useraccountid = p.purchaseruseraccountid))
+LEFT JOIN stage.shippingaddress r ON r.purchaseid = p.purchaseid
+group by
+		1, 2, 3, 4, 6, 8, 13, 14; 
+
+drop table if exists #ost_ticket_final;
+drop table if exists telefone;
+drop table if exists telefonepurchase;
+
+drop table if exists telefone_final;
+create temporary table telefone_final(
+useraccountid integer,
+telefone varchar(50),
+"date" timestamp,
+CPF varchar(20),
+Cartao varchar(30),
+IP varchar(50),
+deviceinstallid varchar(36),
+facebookuserid varchar(56)
+)
+diststyle key
+distkey (useraccountid)
+sortkey (useraccountid);
+
+insert into telefone_final(useraccountid,telefone,"date",CPF,Cartao,IP,deviceinstallid,facebookuserid)
+select	useraccountid
+		,telefone
+		,max("date") "date"
+		,max(CPF) CPF
+		,max(Cartao) Cartao
+		,max(IP) IP
+		,max(deviceinstallid) deviceinstallid
+		,max(facebookuserid) facebookuserid
+	from (
+		select 	useraccountid
+				,telefoneAntiFraud as telefone
+				,telefoneAntiFraud_date as "date"
+				,CPF
+				,Cartao
+				,IP
+				,deviceinstallid
+				,facebookuserid
+			from telefone_aux
+		union all 
+		select 	useraccountid
+				,telefoneTicket as telefone
+				,telefoneTicket_date as "date"
+				,CPF
+				,Cartao
+				,IP
+				,deviceinstallid
+				,facebookuserid
+			from telefone_aux
+		union all 
+		select 	useraccountid
+				,telefoneLegado as telefone
+				,telefoneLegado_date as "date"
+				,CPF
+				,Cartao
+				,IP
+				,deviceinstallid
+				,facebookuserid
+			from telefone_aux
+		union all 
+		select 	useraccountid
+				,telefoneEntrega as telefone
+				,telefoneEntrega_date as "date"
+				,CPF
+				,Cartao
+				,IP
+				,deviceinstallid
+				,facebookuserid
+			from telefone_aux
+		)
+where 1=1
+and len(telefone) > 1
+and telefone is not null
+	group by 
+		1, 2;
+
+drop table if exists telefone_aux;
+
+delete FROM reports.telefoneusuario
+	using telefone_final
+	where reports.telefoneusuario.useraccountid = telefone_final.useraccountid and reports.telefoneusuario.telefone = telefone_final.telefone;
+	
+INSERT INTO reports.TelefoneUsuario(useraccountid,telefone,"date",CPF,Cartao, IP, deviceinstallid, facebookuserid)
+SELECT distinct tf.useraccountid
+		,tf.telefone
+		,tf."date"
+		,COALESCE(tf.CPF,'') CPF
+		,COALESCE(tf.Cartao,'') Cartao
+		,COALESCE(tf.IP,'') IP
+		,COALESCE(tf.deviceinstallid,'') deviceinstallid
+		,COALESCE(tf.facebookuserid,'') facebookuserid
+FROM telefone_final tf
+	left join reports.telefoneusuario tu on tf.useraccountid = tu.useraccountid and tf.telefone = tu.telefone
+where tu.useraccountid is null;
+
+drop table if exists telefone_final;
+
+COMMIT;

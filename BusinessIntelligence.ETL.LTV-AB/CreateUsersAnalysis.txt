@@ -1,0 +1,16 @@
+﻿drop table if exists  #ltvUsersAnalysis
+;
+create table #ltvUsersAnalysis
+(
+	userAccountId int
+,	userAccountPurchaseClass varchar(100)	
+,	userAccountPurchaseOrder int
+,	userTypeName varchar(100)
+,	testName varchar(100)
+,	yearMonth char(7)
+,	isUserAccountUnified char(1)
+,	eventDate date
+)
+distkey(userAccountId)
+sortkey(userAccountId,userAccountPurchaseOrder)
+;

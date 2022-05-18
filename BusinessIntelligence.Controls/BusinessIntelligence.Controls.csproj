@@ -1,0 +1,201 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="12.0" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
+    <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
+    <ProductVersion>8.0.30703</ProductVersion>
+    <SchemaVersion>2.0</SchemaVersion>
+    <ProjectGuid>{B2264AA2-5EEF-4F1F-A233-927666B11711}</ProjectGuid>
+    <OutputType>Library</OutputType>
+    <AppDesignerFolder>Properties</AppDesignerFolder>
+    <RootNamespace>BusinessIntelligence.Controls</RootNamespace>
+    <AssemblyName>BusinessIntelligence.Controls</AssemblyName>
+    <TargetFrameworkVersion>v4.8</TargetFrameworkVersion>
+    <FileAlignment>512</FileAlignment>
+    <TargetFrameworkProfile />
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
+    <DebugSymbols>true</DebugSymbols>
+    <DebugType>full</DebugType>
+    <Optimize>false</Optimize>
+    <OutputPath>bin\Debug\</OutputPath>
+    <DefineConstants>DEBUG;TRACE</DefineConstants>
+    <ErrorReport>prompt</ErrorReport>
+    <WarningLevel>4</WarningLevel>
+    <Prefer32Bit>false</Prefer32Bit>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
+    <DebugType>pdbonly</DebugType>
+    <Optimize>true</Optimize>
+    <OutputPath>bin\Release\</OutputPath>
+    <DefineConstants>TRACE</DefineConstants>
+    <ErrorReport>prompt</ErrorReport>
+    <WarningLevel>4</WarningLevel>
+    <Prefer32Bit>false</Prefer32Bit>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="Microsoft.VisualBasic">
+      <HintPath>..\packages\VisualBasic.PowerPacks.Vs.1.0.0\lib\Microsoft.VisualBasic.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+    <Reference Include="Microsoft.VisualBasic.PowerPacks.Vs, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a, processorArchitecture=MSIL">
+      <HintPath>..\packages\VisualBasic.PowerPacks.Vs.1.0.0\lib\Microsoft.VisualBasic.PowerPacks.Vs.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+    <Reference Include="System" />
+    <Reference Include="System.Core" />
+    <Reference Include="System.Drawing" />
+    <Reference Include="System.Windows.Forms" />
+    <Reference Include="System.Xml.Linq" />
+    <Reference Include="System.Data.DataSetExtensions" />
+    <Reference Include="Microsoft.CSharp" />
+    <Reference Include="System.Data" />
+    <Reference Include="System.Xml" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="BigListSelector.cs">
+      <SubType>UserControl</SubType>
+    </Compile>
+    <Compile Include="BigListSelector.Designer.cs">
+      <DependentUpon>BigListSelector.cs</DependentUpon>
+    </Compile>
+    <Compile Include="BoolSelector.cs">
+      <SubType>UserControl</SubType>
+    </Compile>
+    <Compile Include="BoolSelector.Designer.cs">
+      <DependentUpon>BoolSelector.cs</DependentUpon>
+    </Compile>
+    <Compile Include="CheckedComboBox.cs">
+      <SubType>Component</SubType>
+    </Compile>
+    <Compile Include="DataTypeCriterial.cs" />
+    <Compile Include="DateCriterial.cs" />
+    <Compile Include="DateSelectionType.cs" />
+    <Compile Include="FormBigListSelector.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="FormBigListSelector.Designer.cs">
+      <DependentUpon>FormBigListSelector.cs</DependentUpon>
+    </Compile>
+    <Compile Include="FormDateSelector.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="FormDateSelector.Designer.cs">
+      <DependentUpon>FormDateSelector.cs</DependentUpon>
+    </Compile>
+    <Compile Include="FormSelector.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="FormTextSelector.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="FormTextSelector.Designer.cs">
+      <DependentUpon>FormTextSelector.cs</DependentUpon>
+    </Compile>
+    <Compile Include="FormValueSelector.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="FormValueSelector.Designer.cs">
+      <DependentUpon>FormValueSelector.cs</DependentUpon>
+    </Compile>
+    <Compile Include="ListSelector.cs">
+      <SubType>UserControl</SubType>
+    </Compile>
+    <Compile Include="ListSelector.Designer.cs">
+      <DependentUpon>ListSelector.cs</DependentUpon>
+    </Compile>
+    <Compile Include="LogWindow.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="LogWindow.Designer.cs">
+      <DependentUpon>LogWindow.cs</DependentUpon>
+    </Compile>
+    <Compile Include="NumberCriterial.cs" />
+    <Compile Include="NumberCriterialType.cs" />
+    <Compile Include="ParameterList.cs">
+      <SubType>UserControl</SubType>
+    </Compile>
+    <Compile Include="ParameterList.Designer.cs">
+      <DependentUpon>ParameterList.cs</DependentUpon>
+    </Compile>
+    <Compile Include="Properties\Resources.Designer.cs">
+      <AutoGen>True</AutoGen>
+      <DesignTime>True</DesignTime>
+      <DependentUpon>Resources.resx</DependentUpon>
+    </Compile>
+    <Compile Include="Selector.cs">
+      <SubType>UserControl</SubType>
+    </Compile>
+    <Compile Include="Selector.Designer.cs">
+      <DependentUpon>Selector.cs</DependentUpon>
+    </Compile>
+    <Compile Include="TextContent.cs">
+      <SubType>UserControl</SubType>
+    </Compile>
+    <Compile Include="TextContent.Designer.cs">
+      <DependentUpon>TextContent.cs</DependentUpon>
+    </Compile>
+    <Compile Include="Properties\AssemblyInfo.cs" />
+    <Compile Include="TextCriterialType.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="BigListSelector.resx">
+      <DependentUpon>BigListSelector.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="BoolSelector.resx">
+      <DependentUpon>BoolSelector.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="FormBigListSelector.resx">
+      <DependentUpon>FormBigListSelector.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="FormDateSelector.resx">
+      <DependentUpon>FormDateSelector.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="FormTextSelector.resx">
+      <DependentUpon>FormTextSelector.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="FormValueSelector.resx">
+      <DependentUpon>FormValueSelector.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="ListSelector.resx">
+      <DependentUpon>ListSelector.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="LogWindow.resx">
+      <DependentUpon>LogWindow.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="ParameterList.resx">
+      <DependentUpon>ParameterList.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Properties\Resources.resx">
+      <Generator>ResXFileCodeGenerator</Generator>
+      <LastGenOutput>Resources.Designer.cs</LastGenOutput>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Selector.resx">
+      <DependentUpon>Selector.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="TextContent.resx">
+      <DependentUpon>TextContent.cs</DependentUpon>
+    </EmbeddedResource>
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\BusinessIntelligence.Common\BusinessIntelligence.Common.csproj">
+      <Project>{7E29ADDD-D954-4319-872F-057D4271CDE7}</Project>
+      <Name>BusinessIntelligence.Common</Name>
+    </ProjectReference>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="packages.config" />
+    <None Include="Resources\filter32.jpg" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="Resources\filtergrey32.jpg" />
+  </ItemGroup>
+  <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+  <!-- To modify your build process, add your task inside one of the targets below and uncomment it. 
+       Other similar extension points exist, see Microsoft.Common.targets.
+  <Target Name="BeforeBuild">
+  </Target>
+  <Target Name="AfterBuild">
+  </Target>
+  -->
+</Project>

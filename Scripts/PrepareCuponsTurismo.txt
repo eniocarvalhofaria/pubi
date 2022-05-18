@@ -1,0 +1,155 @@
+--cupons turismo
+TRUNCATE TABLE reports.cuponsturismo;
+INSERT INTO reports.cuponsturismo
+SELECT DISTINCT  
+  cupom
+, data_venda
+, mes_venda
+, data_expiracao
+, data_cancelamento
+, data_uso	
+, data_disponibilidade
+, parceiro
+, contrato
+, idoferta
+, oferta
+, nome_comprador
+, email
+, telefone
+, categoria
+, sub_categoria
+, codigo_validacao
+, Operadoras       
+, valorunitario
+, CASE WHEN couponstatusid = 2 
+	       OR data_cancelamento IS NOT NULL 
+	   then 'Cancelado'
+	   WHEN couponstatusid = 4 
+	   then 'Em Disputa'
+	   WHEN couponstatusid = 1 
+	       and data_cancelamento is null 
+	       and data_uso is null
+	       and unifieddiscountid is not null
+	       then 'Noshow'
+	   WHEN couponstatusid = 1 
+	       and data_cancelamento is null 
+	       and data_uso is null
+	       and unifieddiscountid is null
+	       and DATEADD(d,45,CAST(data_expiracao AS DATE)) < CAST(GETDATE() AS DATE) 
+	       then 'Expirado'
+	   WHEN couponstatusid = 1 
+	       and data_cancelamento is null 
+	       and data_uso is null
+	       and unifieddiscountid is null
+	       and data_expiracao > CAST(GETDATE() AS DATE) 
+	       then 'Nao Agendado'     
+	   WHEN couponstatusid = 1 
+	       and data_cancelamento is null 
+	       and data_uso is null
+	       and unifieddiscountid is null
+	       and CAST(GETDATE() AS DATE) BETWEEN data_expiracao AND DATEADD(d,45,data_expiracao) 
+	       then 'Mutavel'
+	   ELSE 'Usado'    
+	   END AS Status_Cupom
+, Day_Use
+, uid
+FROM (
+      SELECT 
+             CAST(c.code AS VARCHAR(16)) AS cupom
+      	   , CAST(c.creationdate AS DATE) AS data_venda
+	       , CAST((LEFT(c.creationdate,7)+'-01') AS DATE) AS mes_venda
+	       , COALESCE(MAX(CAST(n.processdatereal AS DATE)),MAX(CAST(di.dateexpires AS DATE))) AS data_expiracao
+	       , CAST(c.canceldate AS DATE) AS data_cancelamento
+	       , CAST(c.fufillmentdate AS DATE) AS data_uso	
+	       , CAST(mdis.mindateforsale AS DATE) AS data_disponibilidade
+	       , CAST(COALESCE(acc.accountname, co.partnername) AS VARCHAR(80)) AS parceiro
+	       , ud.contractid as contrato
+	       , ud.idoferta
+	       , CAST(TRIM(regexp_replace(di.discountname, '\r|\n|\t','g')) AS VARCHAR(256)) as oferta
+	       , CAST(TRIM(regexp_replace(ua.NAME, '\r|\n|\t','g')) AS VARCHAR(92)) as nome_comprador
+	       , CAST(TRIM(regexp_replace(c.purchaseremailaddress, '\r|\n|\t','g')) AS VARCHAR(92)) as email
+	       , CAST(y.telefone AS VARCHAR(24)) AS telefone
+	       , CAST(cr.category AS VARCHAR(48)) as categoria
+	       , CAST(cr.subcategory_site AS VARCHAR(48)) as sub_categoria
+	       , CAST(c.validationcode AS VARCHAR(24)) as codigo_validacao
+--	       , CASE WHEN co.partnerid IN 
+--
+--(66042,71430,60455,76766,64793,64616,76003,64856,75309,81051,82460,56739,72956,31198,75404,90723,85892,73697) THEN 1  
+--	              ELSE 0 END AS Operadoras      
+		   , case when di.discountcategoryid = 6 then 1 else 0 end Operadoras
+	       , CAST(p.unitvalue AS DECIMAL(10,2)) AS valorunitario
+	       , CASE WHEN offer.tipo_de_viagem = 'Passeios e Day Use' THEN 1 
+	              ELSE 0 END AS Day_Use
+	       , c.couponstatusid
+	       , n.unifieddiscountid
+	       , ud.unifieddiscountid uid
+      FROM ods.cupon c
+      INNER JOIN ods.discount di 
+      	ON di.discountid = c.discountid
+      LEFT JOIN ods.unifieddiscount ud 
+      	ON ud.unifieddiscountid = di.unifieddiscountid
+      LEFT JOIN (
+		         SELECT discount.unifieddiscountid
+			      	, (min(discount.dateforsale))::DATE AS mindateforsale
+		         FROM ods.discount
+		         WHERE (discount.ispublic = 1)
+		         GROUP BY discount.unifieddiscountid
+		         ) mdis 
+	      ON mdis.unifieddiscountid = ud.unifieddiscountid
+      LEFT JOIN reports.contract cr 
+      	ON cr.contractid = ud.contractid
+      LEFT JOIN reports.account acc 
+      	ON acc.accountid = cr.accountid
+      LEFT JOIN ods.partner co 
+      	ON co.partnerid = di.partnerid
+      LEFT JOIN ods.useraccount ua 
+      	ON ua.useraccountid = c.buyeruseraccountid
+      INNER JOIN ods.purchase p 
+      	ON p.purchaseid = c.purchaseid
+      INNER JOIN stage.purchasestatus ps 
+      	ON ps.purchasestatusid = p.purchasestatusid
+      LEFT JOIN (select useraccountid, max(telefone) telefone, max("date") "date" from reports.telefoneusuario group by 1) y 
+      	ON y.useraccountid = c.buyeruseraccountid
+      LEFT JOIN salesforce.ctofertas offer
+      	ON offer.c_digo_oferta_num_rico = ud.idoferta
+      LEFT JOIN ods.mng_deals_latest dl
+      	ON dl.legacydata_unified_discount_id = ud.unifieddiscountid
+      LEFT JOIN ods.noshow n
+      	ON n.unifieddiscountid = di.unifieddiscountid	
+      WHERE EXTRACT(YEAR FROM c.creationdate) >= EXTRACT(YEAR FROM GETDATE()-1)-1
+      AND di.discountcategoryid = 6
+      and ps.countsasrevenue = 1
+      GROUP BY
+             CAST(c.code AS VARCHAR(16))
+      	   , CAST(c.creationdate AS DATE)
+	       , CAST((LEFT(c.creationdate,7)+'-01') AS DATE)
+	       , CAST(c.canceldate AS DATE)
+	       , CAST(c.fufillmentdate AS DATE)
+	       , CAST(mdis.mindateforsale AS DATE)
+	       , CAST(COALESCE(acc.accountname, co.partnername) AS VARCHAR(80))
+	       , ud.contractid
+	       , ud.idoferta
+	       , CAST(TRIM(regexp_replace(di.discountname, '\r|\n|\t','g')) AS VARCHAR(256))
+	       , CAST(TRIM(regexp_replace(ua.NAME, '\r|\n|\t','g')) AS VARCHAR(92))
+	       , CAST(TRIM(regexp_replace(c.purchaseremailaddress, '\r|\n|\t','g')) AS VARCHAR(92))
+	       , CAST(y.telefone AS VARCHAR(24))
+	       , CAST(cr.category AS VARCHAR(48))
+	       , CAST(cr.subcategory_site AS VARCHAR(48))
+	       , CAST(c.validationcode AS VARCHAR(24))
+--	       , CASE WHEN co.partnerid IN 
+--
+--(66042,71430,60455,76766,64793,64616,76003,64856,75309,81051,82460,56739,72956,31198,75404,90723,85892,73697) THEN 1  
+--	              ELSE 0 END 
+		   , case when di.discountcategoryid = 6 then 1 else 0 end
+	       , CAST(p.unitvalue AS DECIMAL(10,2))
+	       , CASE WHEN offer.tipo_de_viagem = 'Passeios e Day Use' THEN 1 
+	              ELSE 0 END
+	       , c.couponstatusid
+	       , n.unifieddiscountid
+	       , ud.unifieddiscountid
+      );
+commit;
+
+
+
+

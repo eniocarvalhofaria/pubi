@@ -1,0 +1,182 @@
+﻿drop table if exists #discountrevenue
+;
+
+select 
+	s.DiscountID
+,	SalesPageID
+,	UnifiedDiscountID
+,	EventDate
+,	sum(GrossSales) GrossSales
+,	sum(GrossSalesPUCommission) GrossSalesPUCommission
+,	sum(GrossSales - CancellationPreBilling) NetSales
+,	sum(AmountToPartner) AmmountToPartner
+,	sum(GrossRevenue) GrossRevenue
+,	sum(Promocodes) Promocodes
+,	SUM(EconomizedValue) EconomizedValue
+,	sum(QTYSoldCoupons) QTYCoupons
+,	sum(QTYTransactions) QTYTransactions
+,	sum(CancellationPreBillingPU) CancelledPreBillingPU
+,	sum(CancellationPreBilling) CancelledPreBilling
+,	sum(CancellationPosBilling) CancelledPosBilling
+,	sum(QTYCouponCancellationPreBilling) QTYCouponCancelledPreBilling
+,	sum(QTYCouponCancellationPosBilling) QTYCouponCancelledPosBilling
+,	sum(Credits) Credits
+,	sum(PaidCredits) PaidCredits
+,	sum(UnpaidCredits) UnpaidCredits
+,	sum(cancellationtotal - CancellationPreBilling) CancelledPosAccounting
+,	sum(CancellationAmountToPartner) CancelledAmountToPartner
+,	sum(NoShow) NoShow
+,	sum(FinanceCharge) FinanceCharge
+,	SourceId
+,	sum(CancellationPosBillingPU) CancelledPosBillingPU
+,	sum(AquirerFee) AquirerFee
+,	sum(AntifraudFee) AntifraudFee
+,	sum(anticipationCost) anticipationCost
+,	sum(Taxes)	Taxes			
+,	sum(SubmittedValue) SubmittedValue
+,	sum(ExtraFees) ExtraFees
+,	buyingoptionnumericid
+,	salesforcebuyingoptionid
+,	salesforceofferid
+,	dealnumericid
+,	sum(promocodesnoactivationrule) promocodesnoactivationrule
+,	sum(TimeToPayEconomy) TimeToPayEconomy
+,	sum(ExtraFeesPU) ExtraFeesPU
+,	sum(CancellationfinanceCharge) CancellationfinanceCharge
+,	sum(CancellationRefundedToAquirer) CancellationRefundedToAquirer
+,	sum(Chargeback) Chargeback
+,	sum(CancellationExtraFees) CancellationExtraFees
+,	sum(CancellationExtraFeesPU) CancellationExtraFeesPU
+,	sum(cancellationpromocodes) cancellationpromocodes
+,	sum(CancellationTotal) totalCancelled
+,	mktSourceId
+,	sum(administrativefee) administrativefee
+,	sum(cancellationadministrativefee) administrativefeecancelled
+,	channelid
+into  #discountrevenue
+from 
+(
+select 
+	pr.channelID
+,	pr.discountid
+,	pr.unifieddiscountid
+,	pr.salespageid
+,	pu.mktsourceid
+,	pur.sourceid
+,	revenuedate eventdate
+,	d.buyingoptionnumericid
+,	d.salesforcebuyingoptionid
+,	d.salesforceofferid
+,	d.dealnumericid
+,	sum(OrderTotalValue) OrderTotalValue
+,	sum(OrderCouponsValue) OrderCouponsValue
+,	sum(OrderExtraFees) OrderExtraFees
+,	sum(OrderFinanceCharge) OrderFinanceCharge
+,	sum(OrderPromocodes) OrderPromocodes
+,	sum(OrderCredits) OrderCredits
+,	sum(OrderValueToPay) OrderValueToPay
+,	sum(GrossSales) GrossSales
+,	sum(GrossSalesPUCommission) GrossSalesPUCommission
+,	sum(GrossSales - CancellationPreBilling) NetSales
+,	sum(AmountToPartner) AmountToPartner
+,	sum(GrossRevenue) GrossRevenue
+,	sum(Promocodes) Promocodes
+,	SUM(EconomizedValue) EconomizedValue
+,	sum(QTYSoldCoupons) QTYSoldCoupons
+,	sum(QTYTransactions) QTYTransactions
+,	sum(CancellationPreBillingPU) CancellationPreBillingPU
+,	sum(CancellationPreBilling) CancellationPreBilling
+,	sum(CancellationPosBilling) CancellationPosBilling
+,	sum(QTYCouponCancellationPreBilling) QTYCouponCancellationPreBilling
+,	sum(QTYCouponCancellationPosBilling) QTYCouponCancellationPosBilling
+,	sum(Credits) Credits
+,	sum(PaidCredits) PaidCredits
+,	sum(UnpaidCredits) UnpaidCredits
+,	sum(CancellationPosTotalValue) CancellationPosTotalValue
+,	sum(CancellationAmountToPartner) CancellationAmountToPartner
+,	sum(NoShow) NoShow
+,	sum(FinanceCharge) FinanceCharge
+,	sum(CancellationPosBillingPU) CancellationPosBillingPU
+,	sum(AquirerFee) AquirerFee
+,	sum(AntifraudFee) AntifraudFee
+,	sum(anticipationCost) anticipationCost
+,	sum(Taxes)	Taxes			
+,	sum(case when grosssales > 0 then ordervaluetopay else 0 end) SubmittedValue
+,	sum(ExtraFees) ExtraFees
+,	sum(promocodesnoactivationrule) promocodesnoactivationrule
+,	sum(TimeToPayEconomy) TimeToPayEconomy
+,	sum(ExtraFeesPU) ExtraFeesPU
+,	sum(CancellationfinanceCharge) CancellationfinanceCharge
+,	sum(CancellationRefundedToAquirer) CancellationRefundedToAquirer
+,	sum(Chargeback) Chargeback
+,	sum(CancellationExtraFees) CancellationExtraFees
+,	sum(CancellationExtraFeesPU) CancellationExtraFeesPU
+,	sum(cancellationpromocodes) cancellationpromocodes
+,	sum(CancellationTotal) CancellationTotal
+,	sum(administrativefee) administrativefee
+,	sum(cancellationadministrativefee) cancellationadministrativefee
+from reports.purchaseRevenue pr 
+left join reports.purchaseurl pu 
+on pr.purchaseid = pu.purchaseid
+left join 
+(
+	select 
+		purchaseid
+	,	case 
+			when sourceid in (1,2,3) then 1
+			when sourceid in (4,5,6) then 6
+		end ChannelId
+	,	sourceid
+	from ods.purchase
+) pur 
+on pr.purchaseid = pur.purchaseid
+left join reports.deals d 
+on d.discountid = pr.discountid
+where revenuedate between dateadd(day,-60,cast(getdate() as date)) and dateadd(day,-1,cast(getdate() as date))
+group by 1,2,3,4,5,6,7,8,9,10,11
+) s
+where eventdate between dateadd(day,-60,cast(getdate() as date)) and dateadd(day,-1,cast(getdate() as date))
+group by 	
+	UnifiedDiscountID
+,	s.DiscountID
+,	EventDate
+,	SalesPageID
+,	SourceId
+,	buyingoptionnumericid
+,	salesforcebuyingoptionid
+,	salesforceofferid
+,	dealnumericid
+,	mktSourceId
+,	channelid
+;
+
+
+insert into #discountRevenue
+(
+	unifieddiscountid
+,	discountid
+,	eventdate
+,	noshow
+,	channelid
+,	grossrevenue
+)
+SELECT
+	unifieddiscountid
+,	discountid
+,	noshowdate
+,	noshowmanagerialvalue
+,	1
+,	noshowmanagerialvalue
+from reports.noshownotidentified
+where noshowdate between dateadd(day,-60,cast(getdate() as date)) and dateadd(day,-1,cast(getdate() as date))
+;
+
+delete from reports.DiscountRevenue
+where eventdate between dateadd(day,-60,cast(getdate() as date)) and dateadd(day,-1,cast(getdate() as date))
+;
+
+insert into reports.DiscountRevenue
+Select * from #discountRevenue
+;
+commit
+;

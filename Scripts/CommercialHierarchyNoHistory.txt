@@ -1,0 +1,112 @@
+truncate reports.commercialhierarchy_nohistory;
+insert into reports.commercialhierarchy_nohistory (
+select
+		ud.unifieddiscountid
+	,	cast((case when (acc.sharedserviceowner is null or acc.sharedserviceowner = '') then 
+				case when np.accountname is not null
+					then cp.Perc_Commission
+					else
+						case when em_acc.classification like '%Hunter%' then 0 
+							else 1
+						end
+				end
+				else (100-acc.sharedservicepercent)/100.0 
+			end) as dec(10,3)) "sharedservicepercent"
+	,	case
+			when (em_acc.sales_team = 'Key Account (E-commerce)' or em_off.sales_team = 'Key Account (E-commerce)') then em_off.name
+			else case
+					when acc.iscalculatedbycontract = 1 then em_con.name
+					else em_acc.name
+				end
+		end "Owner"
+	,	coalesce(case when (em_acc.sales_team = 'Key Account (E-commerce)' or em_off.sales_team = 'Key Account (E-commerce)') then upper(em_off.name) else case when acc.iscalculatedbycontract = 1 then upper(em_con.name) else upper(em_acc.name) end end,'Em tratamento') "OwnerERP"
+	,	coalesce(case when (em_acc.sales_team = 'Key Account (E-commerce)' or em_off.sales_team ='Key Account (E-commerce)') then em_off.sales_coordinator else case when acc.iscalculatedbycontract = 1 then em_con.sales_coordinator else em_acc.sales_coordinator end end,'Em tratamento') "Coordinator"
+	,	coalesce(case when (em_acc.sales_team = 'Key Account (E-commerce)' or em_off.sales_team ='Key Account (E-commerce)') then em_off.sales_manager else case when acc.iscalculatedbycontract = 1 then em_con.sales_manager else em_acc.sales_manager end end,'Em tratamento') "Manager"
+	,	coalesce(case when (em_acc.sales_team = 'Key Account (E-commerce)' or em_off.sales_team ='Key Account (E-commerce)') then ot_off.region else case when acc.iscalculatedbycontract = 1 then ot_con.region else ot_acc.region end end,'Em tratamento') "Region"
+	,	coalesce(case when (em_acc.sales_team = 'Key Account (E-commerce)' or em_off.sales_team ='Key Account (E-commerce)') then em_off.sales_team else case when acc.iscalculatedbycontract = 1 then em_con.sales_team else em_acc.sales_team end end,'Em tratamento') "Team"
+from ods.unifieddiscount ud
+	left join salesforce.ctofertas offer on offer.c_digo_oferta_num_rico = ud.idoferta
+	left join salesforce.ctcontratopu contratoPU on ud.ContractId = right(contratoPU.Name, 6)
+	left join reports.contract con on con.contractid = ud.contractid
+	left join reports.account acc on acc.accountid = con.accountid
+	left join salesforce.cfaccount cfacc on cfacc.id = acc.accountid
+--v-- estrutura comercial contabilizada por CONTA (regra geral) --v--
+	left join reports.gpn_new_partners np (nolock) on (np.accountName = acc.accountName and
+							cast(getdate() - 1 as date) between np.date_as_newpartner and dateadd(day, 180, np.date_as_newpartner))
+	left join reports.dm_employee em_acc on left(cfacc.id_propriet_rio_cadastro_funcion_rio, 15) = left(em_acc.employee_sf_code, 15)
+											and em_acc.active_dw_version = 'Y'
+	left join reports.dm_commissionpolicy cp (nolock) on (em_acc.commissionpolicy_ID = cp.commissionpolicy_ID
+							and cast(getdate() - 1 as date) between dateadd(day, cp.RangeStart, np.date_as_newpartner) and dateadd(day, cp.RangeEnd, np.date_as_newpartner)
+							and cast(getdate() - 1 as date) between cp.Date_DW_Start and cp.Date_DW_End)
+	left join reports.OwnerTeam ot_acc on Upper(em_acc.name) = Upper(ot_acc.OwnerERP)
+--v-- estrutura comercial contabilizada por OFERTA (caso e-commerce) --v--
+	left join reports.dm_employee em_off on left(offer.propriet_rio_compartilhado, 15) = left(em_off.employee_sf_code, 15)
+											and em_off.active_dw_version = 'Y'
+	left join reports.OwnerTeam ot_off on Upper(em_off.name) = Upper(ot_off.OwnerERP)
+--v-- estrutura comercial contabilizada por contrato (caso turismo + gastronomia) --v--
+	left join reports.dm_employee em_con on left(contratoPU.Propriet_rio_compartilhado, 15) = left(em_con.employee_sf_code, 15)
+											and em_con.active_dw_version = 'Y'
+	left join reports.OwnerTeam ot_con on Upper(em_con.name) = Upper(ot_con.OwnerERP)
+--------------------------------------
+union all
+--------------------------------------
+select
+		ud.unifieddiscountid
+	,	cast((case when (acc.sharedserviceowner is null or acc.sharedserviceowner = '') then 0 else (acc.sharedservicepercent)/100.0 end) as dec(10,3)) "sharedservicepercent"
+	,	func_acc.name "Owner"
+	,	coalesce(ownere_acc.ownerERP,'Em tratamento') "OwnerERP"
+	,	coalesce(t_acc.coordinator,'Em tratamento') "Coordinator"
+	,	coalesce(t_acc.manager,'Em tratamento') "Manager"
+	,	coalesce(ot_acc.region,'Em tratamento') "Region"
+	,	coalesce(t_acc.team,'Em tratamento') "Team"
+from ods.unifieddiscount ud
+	left join salesforce.ctofertas offer on offer.c_digo_oferta_num_rico = ud.idoferta
+	left join salesforce.ctcontratopu contratoPU on ud.ContractId = right(contratoPU.Name, 6)
+	left join reports.contract con on con.contractid = ud.contractid
+	left join reports.account acc on acc.accountid = con.accountid
+	left join salesforce.cfaccount cfacc on cfacc.id = acc.accountid
+--v-- estrutura comercial contabilizada por CONTA (regra geral) --v--
+	inner join salesforce.ctCadastro_de_Funcion_rios func_acc on left(acc.sharedserviceowner, 15) = left(func_acc.Id, 15) 
+																and acc.sharedserviceowner <> ''
+																and acc.sharedserviceowner is not null
+	left join reports.OwnerERP ownerE_acc on Upper(func_acc.Name) = Upper(ownerE_acc."Owner")
+	left join reports.OwnerTeam ot_acc on Upper(ownerE_acc.OwnerERP) = Upper(ot_acc.OwnerERP)
+	left join reports.Team t_acc on ot_acc.Team = t_acc.Team
+--------------------------------------
+union all 
+--------------------------------------
+select
+		ud.unifieddiscountid
+	,	cast((case when (acc.sharedserviceowner is null or acc.sharedserviceowner = '') then 
+				case when np.accountname is not null
+					then cp.Perc_Commission
+					else
+						case when em_acc.classification like '%Hunter%' then 0 
+							else 1
+						end
+				end
+				else (100-acc.sharedservicepercent)/100.0 
+			end) as dec(10,3)) "sharedservicepercent"
+	,	em_acc.name "Owner"
+	,	coalesce(upper(em_acc.name),'Em tratamento') "OwnerERP"
+	,	coalesce(em_acc.sales_coordinator,'Em tratamento') "Coordinator"
+	,	coalesce(em_acc.sales_manager,'Em tratamento') "Manager"
+	,	coalesce(ot_acc.region,'Em tratamento') "Region"
+	,	coalesce(em_acc.sales_team,'Em tratamento') "Team"
+from ods.unifieddiscount ud
+	left join salesforce.ctofertas offer on offer.c_digo_oferta_num_rico = ud.idoferta
+	left join salesforce.ctcontratopu contratoPU on ud.ContractId = right(contratoPU.Name, 6)
+	left join reports.contract con on con.contractid = ud.contractid
+	left join reports.account acc on acc.accountid = con.accountid
+	left join salesforce.cfaccount cfacc on cfacc.id = acc.accountid
+--v-- estrutura comercial contabilizada por CONTA (regra farmer) --v--
+	left join reports.gpn_new_partners np (nolock) on (np.accountName = acc.accountName and
+							cast(getdate() - 1 as date) between np.date_as_newpartner and dateadd(day, 180, np.date_as_newpartner))
+	inner join reports.dm_employee em_acc on left(cfacc.propriet_rio_compartilhado_farmer, 15) = left(em_acc.employee_sf_code, 15)
+											and em_acc.active_dw_version = 'Y'
+											and cfacc.conta_sem_farmer = 0
+	left join reports.dm_commissionpolicy cp (nolock) on (em_acc.commissionpolicy_ID = cp.commissionpolicy_ID
+							and cast(getdate() - 1 as date) between dateadd(day, cp.RangeStart, np.date_as_newpartner) and dateadd(day, cp.RangeEnd, np.date_as_newpartner)
+							and cast(getdate() - 1 as date) between cp.Date_DW_Start and cp.Date_DW_End)
+	left join reports.OwnerTeam ot_acc on Upper(em_acc.name) = Upper(ot_acc.OwnerERP)
+);

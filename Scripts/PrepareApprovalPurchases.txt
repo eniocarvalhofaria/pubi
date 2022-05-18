@@ -1,0 +1,239 @@
+
+
+drop  table  if exists temporary;
+
+create temporary  table dp90
+(
+DiscountId int ,
+FirstPublicationDate date
+)
+distkey(DiscountId)
+sortkey(FirstPublicationDate);
+
+
+
+insert into  dp90
+select
+	DiscountId,
+	FirstPublicationDate
+from
+	ods.discount d inner join
+	(
+		select
+			distinct UnifiedDiscountId,
+			FirstPublicationDate
+		from
+			reports.UnifiedDiscountPublication udp inner join
+			(
+				select
+					UnifiedPartnerId
+				,	min( dateforsale ) FirstPublicationDate
+				from
+					reports.UnifiedDiscountPublication
+				group by 1
+			) fp on
+			udp.UnifiedPartnerId = fp.UnifiedPartnerId
+	) udp90 on
+	d.UnifiedDiscountId = udp90.UnifiedDiscountId;
+
+analyze dp90;
+	
+drop  table  if exists 	react;
+
+create temporary table react
+(
+purchaseid int
+)
+distkey(purchaseid)
+sortkey(purchaseid);
+
+
+insert into react
+select
+	a.purchaseid
+from
+(
+	select 
+			UserAccountId
+		,	purchaseID
+		,	purchaseinitiated
+		,	rank() over(partition by UserAccountId order by purchaseID) porder
+		from ods.sales
+) a
+inner join
+(
+	select 
+			UserAccountId
+		,	purchaseID
+		,	purchaseinitiated
+		,	rank() over(partition by UserAccountId order by purchaseID) porder
+		from ods.sales
+) b
+on a.useraccountid = b.useraccountid
+and a.porder = b.porder + 1
+and cast(b.purchaseinitiated as date) < dateadd(day,-30,cast(a.purchaseinitiated as date));
+
+analyze react;
+	
+drop  table  if exists firstsale;
+	
+create temporary table firstsale
+(
+UserAccountId int,
+minpurchaseid int
+)
+distkey(UserAccountId)
+sortkey(UserAccountId);
+
+insert into 	firstsale
+select 
+	UserAccountId
+,	min(purchaseId) minpurchaseid
+from ods.sales
+group by 1;
+
+analyze firstsale;
+	
+
+drop  table  if exists deb;	
+
+create temporary table deb(
+PurchaseID int,
+DebitID int,
+Value float
+)
+distkey(PurchaseID)
+sortkey(PurchaseID);
+	
+insert into deb
+select PurchaseID, MAX(DebitID) DebitID, sum(Value) Value
+from stage.Debit 
+group by PurchaseID	;
+	
+analyze deb;
+	
+
+
+drop  table  if exists af;		
+	
+create temporary table af (
+	purchasepaymentdataid int
+, 	laststatusid int
+,	PaymentAntiFraudClassID int
+,	isfromreprovedpayment int
+,	 isLastStatus int
+)
+distkey(purchasepaymentdataid)
+sortkey(isLastStatus);
+
+insert into af
+select 
+	a.purchasepaymentdataid
+, 	laststatusid 
+,	PaymentAntiFraudClassID
+,	isfromreprovedpayment
+,	case when rank() over(partition by a.purchasepaymentdataid order by lastupdate desc) = 1 then 1 else 0 end isLastStatus
+from ods.PaymentAntiFraud a
+left join stage.paymentantifraudscriptingtest b 
+on a.purchasepaymentdataid = b.purchasepaymentdataid
+where laststatusid is not null
+and (
+	   (PaymentAntiFraudClassID in (2,3) and (b.testscenario = 'A' or b.testscenario is null))
+or (PaymentAntiFraudClassID in (9) and b.testscenario = 'C')
+or (PaymentAntiFraudClassID in (10) and b.testscenario = 'B')
+);
+
+analyze af;
+
+
+
+delete from reports.approvalPurchases;
+
+insert 	into reports.approvalPurchases
+select 
+	pur.purchaseid
+,	CAST(purchaseinitiated as DATE) PurchaseDate
+,	case when sourceid = 2 or  pur.httpreferrer  like '%Mobile: %' then 2 else 1 end accesstypeId
+,	purl.mktSourceId
+,	ps.PurchaseStatusId
+,	PaymentCreditCardTypeId		
+,	PaymentGatewayId
+,	case
+		when pur.purchaseStatusId = 12		then 12
+		when countsasrevenue = 1 and pur.purchaseStatusId <> 9 		then 1
+		when pur.PurchaseStatusID = 6 and ppd.PaymentMethodID in (6,14,18,5)		then 3
+		when  pur.PurchaseStatusID  in (6) 		then 5
+		when ppd.InternalReferenceNumber IS null  		then 6
+		when pur.PurchaseStatusID IS null 		then 10 
+		when pur.PurchaseStatusID  in (30003) 		then 7
+		when af.LastStatusId in (1,4) and af.PaymentAntiFraudClassID = 1		then 11
+		when af.isfromreprovedpayment = 1		then 8
+		when af.LastStatusId in (1,4) and af.PaymentAntiFraudClassID in (2,3,9,10,11)		then 9
+		when pur.purchaseStatusId = 9		then 1
+		when  pur.PurchaseStatusID in (30002)		then 8
+		when pur.PurchaseStatusID = 4 and ppd.PaymentMethodID in (6)		then 8
+		when cardnumber = '411111xxxxxx1111'		then 13
+		when pur.PurchaseStatusID = 4 	then 2
+		when pur.PurchaseStatusID = 7		then 3
+		when pur.PurchaseStatusID in (30001)	 then 4
+		when pur.PurchaseStatusID in (1) and ppd.PaymentMethodID not in (6,14,18,5)	then 4		
+		when  pur.PurchaseStatusID  in (1)		then 5
+		else pur.PurchaseStatusID + 1000000
+	end approvalStatusId
+,	UnifiedDiscountID
+,	case 
+		when pur.totalValue <= 100 then 1
+		when pur.totalValue <= 200 then 2
+		when pur.totalValue <= 500 then 3
+		when pur.totalValue <= 1000 then 4
+		else 5
+	end ValueRangeId
+,	case when minpurchaseid = pur.purchaseid then 1 else 0 end isFirst
+,	case when dp90.FirstPublicationDate is null then 0 else 1 end isNewPartner
+,	case when react.purchaseid is null then 0 else 1 end isReactivation
+,	cast(0 as int) PaymentGatewayReturnCode
+,	1 QTYTransactions
+,	coalesce(numpayments,1) sumPayments
+,	pur.quantity QTYCoupons
+,	pur.unitvalue * pur.quantity PurchaseValue
+,	(pur.unitvalue * pur.quantity) + coalesce(financecharge,0) TransactionValue
+,	coalesce(financecharge,0) FinanceCharge
+,	coalesce(deb.Value,0) Credits
+,	case
+			when IsValueDiscount = 1
+			then ValueDiscount 
+			else (pur.unitvalue * pur.quantity) * (PercentualDiscountValue / 100)
+		end promocodes
+,	pur.totalvalue SubmittedValue
+,	case when pur.PurchaseStatusID in (1 ,30001)  or (pur.PurchaseStatusID = 6 and not ppd.PaymentMethodID in (6,14,18,5)) or pur.PurchaseStatusID is null then  0 else pur.totalvalue end processedValue
+,	case when countsasrevenue = 1 then pur.totalvalue else 0 end approvedValue
+,	case when countsasrevenue = 1 then pur.unitvalue * pur.quantity else 0 end PurchaseValueApproved
+,	pur.unitvalue * pur.quantity * ourcommission  GrossRevenue
+,	pur.sourceid
+,	case 
+		when pur.sourceid in (1,2,3) then 1
+		when pur.sourceid in (4,5,6) then 6
+	end ChannelId
+from ods.Purchase pur 
+left join reports.purchaseUrl purl on pur.purchaseid = purl.purchaseid
+left join dp90 on	pur.discountid = dp90.discountid 	and dp90.FirstPublicationDate between dateadd(day,-180,cast(purchaseinitiated as date)) and cast(purchaseinitiated as date)
+left join  firstsale on pur.purchaseruseraccountid = firstsale.useraccountid
+left join react on pur.purchaseid = react.purchaseid
+left join deb on pur.PurchaseID = deb.PurchaseID
+left join ods.purchasepaymentdata ppd on pur.PurchaseID = ppd.InternalReferenceNumber
+left join af on af.PurchasePaymentDataID = ppd.PurchasePaymentDataID and isLastStatus = 1
+left join stage.PurchaseStatus ps on pur.PurchaseStatusID = ps.PurchaseStatusId
+left join stage.PaymentMethod pm on ppd.PaymentMethodId = pm.PaymentMethodId
+left join ods.discount dis on pur.discountid = dis.discountid
+left join stage.LogPromotionalCodeUse A on A.PurchaseID = pur.PurchaseID
+left join stage.PromotionalCode B on A.PromotionalCodeID=B.PromotionalCodeID
+where CAST(purchaseinitiated as DATE) between '2013-01-01' and cast(dateadd(day,-1,getdate()) as date)
+and pur.purchaseid not in(46030908,46030895)
+and  (cardnumber <> '41111A1xxxxxx1111' or cardnumber is null)
+;
+
+
+drop table dp90;
+drop table firstsale;
+drop table react;
+drop table af;

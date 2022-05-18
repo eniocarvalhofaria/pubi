@@ -1,0 +1,128 @@
+drop table if exists #prep;
+
+select	---top 100			
+		  dr.purchaseruseraccountid	
+		,  right(dr.purchaseruseraccountid, 1) as digito
+		, dr.RevenueDate			
+		, ua.emailaddress
+		, count(distinct dr.purchaseid) QtdCompra					
+		, sum(dr.QTYSoldCoupons) QTYCoupons					
+		, sum(coalesce(dr.QTYCouponCancellationPreBilling,0) + coalesce(dr.QTYCouponCancellationPosBilling,0)) QtyCouponsCancelados					
+		--, sum(coalesce(av.QTYCouponsAvaliado,0)) QTYCouponsAvaliado					
+		, sum((coalesce(dr.grosssalespucommission, 0) + coalesce(dr.NoShow, 0) + coalesce(dr.financecharge, 0) + coalesce(dr.extrafeespu, 0) + coalesce(dr.administrativefee, 0)) - 					
+			  (coalesce(dr.CancellationPreBillingPU, 0) + coalesce(dr.cancellationposbillingpu, 0) + coalesce(dr.cancellationextrafeespu, 0) + coalesce(dr.cancellationfinancecharge, 0) + coalesce(dr.cancellationadministrativefee, 0)) -				
+			  (coalesce(dr.aquirerfee, 0) + coalesce(dr.antifraudfee, 0) + coalesce(dr.promocodes, 0) + coalesce(dr.anticipationcost, 0) - coalesce(dr.cancellationpromocodes, 0))) "grossprofit"				
+	 into #prep
+		from reports.purchaserevenue dr						
+	 INNER JOIN ods.useraccount ua ON dr.purchaseruseraccountid = ua.useraccountid
+	 where dr.RevenueDate::date >= (SELECT (CURRENT_TIMESTAMP - INTERVAL '365 days') as data)		
+	 group by  1,2,3, 4;
+
+drop table if exists #analise;
+SELECT 
+ao.purchaseruseraccountid	
+, ao.emailaddress
+, (datediff(day,max(ao.revenuedate),CURRENT_DATE)/30)+1  as RecenciaCPA 
+, sum(ao.qtdcompra) as qtdcompra
+, sum(ao.qtycoupons) as qtdcupons
+, sum(ao.qtycouponscancelados) as qtdcuponscanc
+, sum(ao.grossprofit) as grossprofit
+, max(coalesce(mc.marcacao, 0)) as marcacao
+INTO #analise
+FROM #prep ao
+LEFT JOIN reports.marcadorcontato mc ON ao.emailaddress = mc.email
+group by 1, 2;
+
+
+	drop table if exists #percentile;
+		SELECT 
+			a.purchaseruseraccountid,
+			a.emailaddress,
+			a.RecenciaCPA,
+			a.QtdCompra,
+			a.grossprofit,
+			a.marcacao,
+			ntile(100) over(order by a.RecenciaCPA desc) as Qrec,
+			ntile(100) over(order by a.QtdCompra asc) as QC,
+			ntile(100) over(order by a.grossprofit asc) as QGP,
+			coalesce(marc.QM,0) as QM
+		INTO #percentile
+		FROM #analise a
+		LEFT JOIN (SELECT purchaseruseraccountid, marcacao, ntile(100) over(order by marcacao asc) as QM FROM #analise where marcacao > 0 order by marcacao desc) marc ON 	a.purchaseruseraccountid = marc.purchaseruseraccountid
+		;
+
+		
+
+
+			drop table if exists #quartis;
+			select * INTO #quartis FROM (
+				select 'RecenciaCPA' as KPI, Qrec as Q, min(RecenciaCPA) as valor from #percentile where Qrec in (25,50,75) group by qrec UNION ALL
+				select 'QtdCompra' as KPI, QC as Q, max(QtdCompra) as valor from #percentile where QC in (25,50,75) group by QC UNION ALL
+				select 'grossprofit' as KPI, QGP as Q, max(grossprofit) as valor from #percentile where QGP in (25,50,75) group by QGP UNION ALL
+				select 'marcacao' as KPI, QM as Q, max(marcacao) as valor from #percentile where QM in (25,50,75) group by QM
+			);
+
+
+drop table if exists #Almost;	
+SELECT 
+	a.*, 
+	((GrupoCTT/2) + GrupoRCPA + GrupoGP + GrupoC)/3.5 as Marcador,
+	ntile(20) over(order by (((GrupoCTT/2) + GrupoRCPA + GrupoGP + GrupoC)/3.5) asc) as CATG
+INTO #Almost
+FROM (
+	SELECT
+			purchaseruseraccountid,
+			emailaddress,
+			RecenciaCPA,
+			QtdCompra,
+			grossprofit,
+			marcacao,
+			CASE
+				WHEN RecenciaCPA > (SELECT min(valor) from #quartis q WHERE q.kpi = 'RecenciaCPA' AND q.q = 25) THEN 1
+				WHEN RecenciaCPA BETWEEN (SELECT min(valor) from #quartis q WHERE q.kpi = 'RecenciaCPA' AND q.q = 50) AND (SELECT min(valor) from #quartis q WHERE q.kpi = 'RecenciaCPA' AND q.q = 25) THEN 2
+				WHEN RecenciaCPA BETWEEN (SELECT min(valor) from #quartis q WHERE q.kpi = 'RecenciaCPA' AND q.q = 75) AND (SELECT min(valor) from #quartis q WHERE q.kpi = 'RecenciaCPA' AND q.q = 50) THEN 3
+				WHEN RecenciaCPA <= (SELECT min(valor) from #quartis q WHERE q.kpi = 'RecenciaCPA' AND q.q = 75) THEN 4
+			END AS GrupoRCPA,
+			CASE
+				WHEN QtdCompra < (SELECT min(valor) from #quartis q WHERE q.kpi = 'QtdCompra' AND q.q = 25) THEN 1
+				WHEN QtdCompra BETWEEN (SELECT min(valor) from #quartis q WHERE q.kpi = 'QtdCompra' AND q.q = 25) AND (SELECT min(valor) from #quartis q WHERE q.kpi = 'QtdCompra' AND q.q = 50) THEN 2
+				WHEN QtdCompra BETWEEN (SELECT min(valor) from #quartis q WHERE q.kpi = 'QtdCompra' AND q.q = 50) AND (SELECT min(valor) from #quartis q WHERE q.kpi = 'QtdCompra' AND q.q = 75) THEN 3
+				WHEN QtdCompra >= (SELECT min(valor) from #quartis q WHERE q.kpi = 'QtdCompra' AND q.q = 75) THEN 4
+			END AS GrupoGP,
+			CASE
+				WHEN grossprofit < (SELECT min(valor) from #quartis q WHERE q.kpi = 'grossprofit' AND q.q = 25) THEN 1
+				WHEN grossprofit BETWEEN (SELECT min(valor) from #quartis q WHERE q.kpi = 'grossprofit' AND q.q = 25) AND (SELECT min(valor) from #quartis q WHERE q.kpi = 'grossprofit' AND q.q = 50) THEN 2
+				WHEN grossprofit BETWEEN (SELECT min(valor) from #quartis q WHERE q.kpi = 'grossprofit' AND q.q = 50) AND (SELECT min(valor) from #quartis q WHERE q.kpi = 'grossprofit' AND q.q = 75) THEN 3
+				WHEN grossprofit >= (SELECT min(valor) from #quartis q WHERE q.kpi = 'grossprofit' AND q.q = 75) THEN 4
+			END AS GrupoC,
+			CASE
+				WHEN marcacao = 0 THEN 0
+				WHEN marcacao > 0 AND marcacao < (SELECT min(valor) from #quartis q WHERE q.kpi = 'marcacao' AND q.q = 25) THEN 1
+				WHEN marcacao BETWEEN (SELECT min(valor) from #quartis q WHERE q.kpi = 'marcacao' AND q.q = 25) AND (SELECT min(valor) from #quartis q WHERE q.kpi = 'marcacao' AND q.q = 50) THEN 2
+				WHEN marcacao BETWEEN (SELECT min(valor) from #quartis q WHERE q.kpi = 'marcacao' AND q.q = 50) AND (SELECT min(valor) from #quartis q WHERE q.kpi = 'marcacao' AND q.q = 75) THEN 3
+				WHEN marcacao >= (SELECT min(valor) from #quartis q WHERE q.kpi = 'marcacao' AND q.q = 75) THEN 4
+			END AS GrupoCTT
+	FROM #percentile
+) a  WHERE GrupoC = 4 and GrupoCTT >= 3 and GrupoGP = 4 and GrupoRCPA >= 3;
+
+
+drop table if exists reports.RFVC_customers;
+SELECT *,
+			CASE
+				WHEN CATG < 12 THEN '2-Prata'
+				WHEN CATG BETWEEN 12 AND 17 THEN '1-Ouro'
+				WHEN CATG >= 17 THEN '0-Diamante'
+			END AS GrupoFinal
+	into reports.RFVC_customers
+FROM #Almost;
+
+
+
+grant all privileges on table reports.RFVC_customers to group bi_group;
+grant all privileges on table reports.RFVC_customers to group bi_group_r;
+
+
+
+--select emailaddress, CATG, marcacao from #final where grupofinal <> '3-Bronze' group by 1,2,3 order by CATG DESC;
+
+--select GrupoFinal, count(*), min(RecenciaCPA) Recencia, min(QtdCompra) QtdCompras, min(grossprofit) LucroBruto, min(marcacao) Contato  from #final group by 1 order by 1;

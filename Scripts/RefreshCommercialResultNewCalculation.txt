@@ -1,0 +1,2857 @@
+﻿/************************************************************************************************/
+/* Transform and load all adjustments needs to deliver commercial reports                       */
+/* Created by: Ricardo Tanaka - 19/02/2018                                                      */
+/*                                                                                              */
+/* Obs.: - Com a entrada do Groupon e mudanças nas metodologias de cálculo para comissionamento */
+/*       houve a necessidade de grandes alterações e alguns hard-codes foram necessários,       */
+/*       principalmente no histórico das contas, pois na entrada da figura do farmer, o campo   */
+/*       criado no SalesForce para armazenar o proprietario, não estava preparado para ser      */
+/*       auditado, por isso ficaram alguns buracos no histórico.                                */
+/*       - O conceito de Parceiro Novo, trazido pelo Groupon, também não existia e teve que ser */
+/*       adaptado e nem todos os registros refletem a realidade, por uma necessidade do negócio.*/
+/*       Por exemplo, uma conta nova poderia já ter alguma publicação há mais de 30 dias e se   */
+/*       um hunter entrasse como proprietario da conta, ela deveria voltar ao estado de nova    */
+/*       a partir do dia 01/01/2018, para que o hunter não perdesse faturamento da conta.       */
+/************************************************************************************************/
+-----------------------------------------------------------------------------
+-- Step 010
+-- Prepare all dimensional tables only with interesting data
+-- Account and Contract tables
+-----------------------------------------------------------------------------
+drop table if exists reports.com_account;
+create table reports.com_account
+(
+	accountid varchar(18),
+	accountname varchar(500),
+	cnpj varchar(50),
+	accountcity varchar(150),
+	city varchar(150),
+	state varchar(150),
+	neighborhood varchar(255),
+	atividade_economica varchar(500), 
+	classificacao_dbm float,
+	iscalculatedbycontract smallint,
+	proprietario_compartilhado varchar(18),
+	sharedserviceowner varchar(18),
+	sharedservicepercent integer,
+	proprietario_compartilhado_farmer varchar(18),
+	conta_sem_farmer smallint, 
+	conta_sem_hunter smallint, 
+	conta_sem_proprietario_compartilhado smallint,
+	conta_ecommerce smallint,
+	date_dw_load datetime
+)
+distkey(accountid)
+sortkey(accountid, proprietario_compartilhado_farmer, proprietario_compartilhado);
+
+insert into reports.com_account
+select 
+	ac.accountid,
+	ac.accountname,
+	ac.cnpj,
+	ac.accountcity,
+	ac.city,
+	ac.state,
+	ac.neighborhood,
+	sf_ac.atividade_econ_mica,
+	sf_ac.classifica_o_dbm,
+	ac.iscalculatedbycontract,
+	sf_ac.propriet_rio_compartilhado,
+	ac.sharedserviceowner,
+	ac.sharedservicepercent,
+	sf_ac.propriet_rio_compartilhado_farmer, 
+	sf_ac.conta_sem_farmer, 
+	sf_ac.conta_sem_hunter, 
+	sf_ac.conta_sem_propriet_rio_compartilhado,
+	case when sf_ac.propriet_rio_texto = 'eCommerce PU' then 1 else 0 end,
+	getdate()
+from reports.account ac (nolock)
+left join salesforce.cfaccount sf_ac (nolock) on ac.accountid = sf_ac.id;
+
+analyze reports.com_account;
+
+grant all privileges on table reports.com_account to group bi_group;
+grant all privileges on table reports.com_account to group bi_group_r;
+
+drop table if exists reports.com_contract;
+create table reports.com_contract
+(
+	contractid integer,
+	salesforcecontractid varchar(18),
+	name varchar(20),
+	accountid varchar(18),
+	category varchar(250),
+	subcategory varchar(250),
+	category_site varchar(250),
+	subcategory_site varchar(250),
+	categoria_site_ct_pu varchar(250),
+	subcategoria_site_ct_pu varchar(250),
+	subsub_ct_pu varchar(250),
+	dealsclub smallint,
+	paymentcondition varchar(4),
+	paymentconditionname varchar(250),
+	subdivision varchar(250),
+	type_site varchar(250),
+	usenow smallint,
+	dealcity varchar(150),
+	proprietario_compartilhado varchar(18),
+	proprietario_id varchar(18),
+	date_dw_load datetime
+)
+distkey(contractid)
+sortkey(contractid, salesforcecontractid, proprietario_compartilhado, proprietario_id);
+
+insert into reports.com_Contract
+select
+	ct.contractid,
+	ct.salesforcecontractid,
+	ct_pu.name,
+	ct.accountid,
+	ct.category,
+	ct.subcategory,
+	ct.category_site,
+	ct.subcategory_site,
+	ct_pu.categoria_site,
+	ct_pu.subcategoria_site,
+	ct_pu.subsub,
+	ct.dealsclub,
+	ct.paymentcondition,
+	ct.paymentconditionname,
+	ct.subdivision,
+	ct.type_site,
+	ct.usenow,
+	ct.dealcity,
+	ct_pu.propriet_rio_compartilhado,
+	ct_pu.propriet_rio_id,
+	getdate()
+from reports.contract ct (nolock)
+left join salesforce.ctcontratopu ct_pu (nolock) on ct.salesforcecontractid = ct_pu.id;
+
+analyze reports.com_contract;
+
+grant all privileges on table reports.com_contract to group bi_group;
+grant all privileges on table reports.com_contract to group bi_group_r;
+-----------------------------------------------------------------------------
+-- Step 020
+-- Prepare table with account historical changes
+-----------------------------------------------------------------------------
+drop table if exists #t_delta;
+
+drop table if exists #sfaccounthistory1;
+drop table if exists #t_rank1_before_groupon;
+drop table if exists #t_rank2_before_groupon;
+drop table if exists #t_hist1_before_groupon;
+drop table if exists #t_hist2_before_groupon;
+
+drop table if exists #t_rank1_after_groupon;
+drop table if exists #t_rank2_after_groupon;
+drop table if exists #t_hist1_after_groupon;
+drop table if exists #t_hist2_after_groupon;
+drop table if exists #t_hist3_after_groupon;
+
+drop table if exists #t_hist_all;
+
+drop table if exists #account_history;
+
+-----------------------------------------------------------------------------
+-- Get last records and load on historical table
+-----------------------------------------------------------------------------
+select * 
+into #t_delta
+from salesforce.sfaccounthistory sfh (nolock)
+where cast(sfh.createddate as date) >= cast(getdate() - 5 as date);
+
+delete from reports.dm_accounthistory_copy
+where cast(createddate as date) >= cast(getdate() - 5 as date);
+
+insert into reports.dm_accounthistory_copy
+select * 
+from #t_delta;
+
+-----------------------------------------------------------------------------
+-- Optimize table gaps and statistics
+-----------------------------------------------------------------------------
+--vacuum reports.dm_accounthistory_copy;
+analyze reports.dm_accounthistory_copy;
+
+select
+distinct id,accountid,createddate,field,newvalue 
+into #sfaccounthistory1
+from reports.dm_accounthistory_copy 
+WHERE 1 = 1
+	and field like 'Propriet_rio_Compartilhado_%'
+	and (newvalue like 'a0W%' or oldvalue like 'a0W%');
+
+-----------------------------------------------------------------------------
+-- Load first owner with later owner change
+-----------------------------------------------------------------------------
+insert into #sfaccounthistory1
+select 
+	ac1.id
+	,ac1.accountid as accountid
+	,case when em.classification like '%Farmer%' then '2018-01-01' else ac4.createddate end createddate
+	,case when em.classification like '%Farmer%' then 'Propriet_rio_Compartilhado_Farmer__c' else ac1.field end field
+	,ac1.oldvalue  as newvalue
+from reports.dm_accounthistory_copy ac1
+left join reports.dm_employee em (nolock) on em.employee_sf_code = ac1.oldvalue and em.date_dw_start between '2018-01-01' and '2018-02-28'
+left join reports.dm_accounthistory_copy ac2 on ac1.accountid = ac2.accountid and ac1.oldvalue = ac2.newvalue and ac2.createddate < ac1.createddate
+inner join (select ac3.id, ac3.createddate from salesforce.sfaccount ac3 (nolock)) ac4 on ac1.accountid = ac4.id
+where 1 = 1
+	and ac1.field like 'Propriet_rio_Compartilhado_%'
+	and ac1.oldvalue like 'a0W%'
+	and ac2.accountid is null;
+
+-----------------------------------------------------------------------------
+-- Load actual owner without changes
+-----------------------------------------------------------------------------
+insert into #sfaccounthistory1
+select
+	0 as id,
+	acc.id as accountid,
+	acc3.createddate,
+	'Propriet_rio_Compartilhado__c' as field,
+	acc.propriet_rio_compartilhado as newvalue
+from salesforce.cfaccount acc (nolock)
+inner join (select acc2.id, acc2.createddate from salesforce.sfaccount acc2 (nolock)) acc3
+	on acc3.id = acc.id
+where 1 = 1
+	and acc.id not in (select accountid from #sfaccounthistory1 where field <> 'Propriet_rio_Compartilhado_Farmer__c');
+	
+-----------------------------------------------------------------------------
+-- Load actual owner (Farmer) without changes
+-----------------------------------------------------------------------------
+insert into #sfaccounthistory1
+select
+	0 as id,
+	acc.id as accountid,
+	acc3.createddate,
+	'Propriet_rio_Compartilhado_Farmer__c' as field,
+	acc.propriet_rio_compartilhado_farmer as newvalue
+from salesforce.cfaccount acc (nolock)
+inner join (select acc2.id, acc2.createddate from salesforce.sfaccount acc2 (nolock)) acc3
+	on acc3.id = acc.id
+where 1 = 1
+	and acc.propriet_rio_compartilhado_farmer <> ''
+	and acc3.createddate >= '2018-02-01'
+	and acc.id not in (select accountid from #sfaccounthistory1 where field = 'Propriet_rio_Compartilhado_Farmer__c');
+	
+
+-----------------------------------------------------------------------------
+-- Reconstructing owner changes before Groupon (before 2018-01-01)
+-----------------------------------------------------------------------------
+select distinct
+	accountid
+	, field
+	, createddate as createddate
+	, newvalue
+	, rank() over (partition by accountid, field order by createddate, id asc) as crank
+into #t_rank1_before_groupon
+from #sfaccounthistory1 sf 
+where 1 = 1
+order by 1;
+
+select distinct
+	accountid
+	, field
+	, createddate as createddate
+	, newvalue
+	, rank() over (partition by accountid, field order by createddate, id asc) + 1 as crank
+into #t_rank2_before_groupon
+from #sfaccounthistory1 sf 
+where 1 = 1
+order by 1;
+
+select 
+	t2.accountid
+	,t2.newvalue as emploeyeeid
+	,t2.field
+	,dateadd(minutes,0,t2.createddate) as startdate
+	,coalesce(dateadd(minutes,-1,t1.createddate),'2099-01-01 00:00:00') as enddate
+	,em.classification
+	,em.sales_team
+	/*campo para indicar o marco zero de contas famer e hunter da migração SP*/
+	,case when left(t2.createddate,7) = '2018-01' or left(t1.createddate,7) = '2018-01' or
+			   left(t2.createddate,10) = '2018-02-05' or left(t1.createddate,10) = '2018-02-05' --última carga no SF mapeada
+		Then 'Jan2018' else 'outros' end as MarcoZero
+into #t_hist1_before_groupon
+from #t_rank2_before_groupon t2
+left join #t_rank1_before_groupon t1 on t1.accountid = t2.accountid and t1.field = t2.field and t1.crank = t2.crank
+left join reports.dm_employee em on em.employee_sf_code = t2.newvalue and cast(t2.createddate as date) between em.date_dw_start and em.date_dw_end;
+
+select *
+into #t_hist2_before_groupon
+from (
+	/*fechando vigência das movimentações ocorridas após a migração do groupon, para ter um marco zero das contas antigas*/
+	select
+		accountid
+		,emploeyeeid
+		,field
+		,startdate
+		,case when cast(enddate as date) >= '2018-01-01' and cast(enddate as date) < '2018-02-06' then '2018-01-01 00:00:00' else enddate end as enddate
+		,'Antes do Groupon' as classification
+		,sales_team
+		,marcozero
+	from #t_hist1_before_groupon
+	where cast(startdate as date) < '2018-01-01'
+	and accountid not in (select distinct accountid from #t_hist1_before_groupon where cast(startdate as date) < '2018-01-01' and cast(enddate as date) = '2099-01-01')
+	----------------
+	union all
+	----------------
+	/*contas que não tiveram movimentação após a entrada do groupon*/
+	select
+		accountid
+		,emploeyeeid
+		,field
+		,startdate
+		,enddate
+		,'Antes do Groupon' as classification
+		,sales_team
+		,marcozero
+	from #t_hist1_before_groupon
+	where cast(startdate as date) < '2018-01-01'
+	and accountid in (select distinct accountid from #t_hist1_before_groupon where cast(startdate as date) < '2018-01-01' and cast(enddate as date) = '2099-01-01')
+);
+
+-----------------------------------------------------------------------------
+-- Reconstructing owner changes after Groupon (after 2018-01-01)
+-----------------------------------------------------------------------------
+select distinct
+	accountid
+	/*correção do field  baseado na classification*/
+	, case when classification like '%Farmer%' then 'Propriet_rio_Compartilhado_Farmer__c' else field end field
+	, createddate as createddate
+	, newvalue
+	, rank() over (partition by accountid, ( case when classification like '%Farmer%' then 'Propriet_rio_Compartilhado_Farmer__c' else field end) order by createddate, id asc) as crank
+into #t_rank1_after_groupon
+from #sfaccounthistory1 sf 
+left join reports.dm_employee em (nolock) on em.employee_sf_code = sf.newvalue and cast(createddate as date) between em.date_dw_start and em.date_dw_end
+where 1 = 1
+	and cast(createddate as date) >= '2018-01-01'
+order by 1;
+
+/*Rank 2 para ordenar movimentação de owner´s baseado na data. No Rank é somado 1  para  deslocar a ordem e criar a data de inicio*/
+select 
+	accountid
+	/*correção do field  baseado na classification*/  
+	, case when classification like '%Farmer%' then 'Propriet_rio_Compartilhado_Farmer__c' else field end field
+	, createddate as createddate
+	, newvalue
+	, rank() over (partition by accountid, ( case when classification like '%Farmer%' then 'Propriet_rio_Compartilhado_Farmer__c' else field end) order by createddate, id asc)+1 as crank
+into #t_rank2_after_groupon
+from #sfaccounthistory1 sf (nolock)
+left join reports.dm_employee em on em.employee_sf_code = sf.newvalue and cast(createddate as date) between em.date_dw_start and em.date_dw_end
+where 1 = 1
+	and cast(createddate as date) >= '2018-01-01'
+order by 1;
+
+select
+	t2.accountid
+	,t2.newvalue as emploeyeeid
+	,t2.field
+	,dateadd(minutes,0,t2.createddate) as startdate
+	,coalesce(dateadd(minutes,-1,t1.createddate),'2099-01-01 00:00:00') as enddate
+	,em.classification
+	,em.sales_team
+	/*campo para indicar o marco zero de contas famer e hunter da migração SP*/
+	,case when left(t2.createddate,7) = '2018-01' or left(t1.createddate,7) = '2018-01' or
+			   left(t2.createddate,10) = '2018-02-05' or left(t1.createddate,10) = '2018-02-05' --última carga no SF mapeada
+		  then 'Jan2018'
+		  else 'outros'
+	end as MarcoZero
+into #t_hist1_after_groupon
+from #t_rank2_after_groupon t2
+left join #t_rank1_after_groupon t1 on t1.accountid = t2.accountid and t1.field = t2.field and t1.crank = t2.crank
+left join reports.dm_employee em on em.employee_sf_code = t2.newvalue and cast(t2.createddate as date) between em.date_dw_start and em.date_dw_end;
+
+select
+	h1.accountid
+	,h1.emploeyeeid
+	,h1.field
+	/*Ajuste para cravar a data inicial como '2018-01-01' das contas com movimentação em jan de 2018 quando owner for hunter ou farmer*/
+	,case when marcozero = 'Jan2018' and (h1.classification like '%Farmer%') and  acc.conta_sem_farmer = 0 
+	           then '2018-01-01'
+	      when marcozero = 'Jan2018' and (h1.classification like '%Hunter%') and  acc.conta_sem_hunter = 0     
+	           then '2018-01-01' 
+	      when marcozero = 'Jan2018' and (h1.classification not like '%Hunter%' and h1.classification not like '%Farmer%')     
+	           then '2018-01-01'      
+		  else h1.startdate end startdate
+	/*Ajuste para cravar data de término, em 31 de dezembro 2017 quando o owner for Fora SP/Travel 
+	 * e a conta não possuir hunter e estiver com data futura*/    
+	,case when  h1.classification = 'Fora SP/Travel' 
+	        and acc.conta_sem_hunter = 1 
+	        and acc.conta_sem_farmer = 0 
+	        and  h1.enddate = '2099-01-01 00:00:00' then '2017-12-31' 
+	      when  h1.classification like '%Farmer%'
+	         and acc.conta_sem_hunter = 0
+	         and acc.conta_sem_farmer = 1
+	         and  h1.enddate = '2099-01-01 00:00:00' then '2017-12-31'
+	   else h1.enddate end as enddate
+	,h1.classification
+	,sales_team
+	,marcozero
+	,acc.conta_sem_hunter 
+into #t_hist2_after_groupon
+from #t_hist1_after_groupon h1
+left join salesforce.cfaccount acc on acc.id = h1.accountid;
+
+select 
+	accountid,
+	emploeyeeid,
+	startdate,
+	/*ajuste da data fim para 2017-12-31, quando a conta não tem hunter e classificação for diferente de farmer*/
+	case when conta_sem_hunter = 1 and classification not like '%Farmer%' and classification not like '%Híbrido%' and classification not like '%Pacotes%' then 
+	dateadd(minutes,-1,'2018-01-01')  else enddate end as enddate,
+	classification,
+	sales_team,
+	marcozero,
+	conta_sem_hunter
+into #t_hist3_after_groupon
+from #t_hist2_after_groupon h2
+where 1 = 1 
+	and not ( marcozero = 'Jan2018' and left(enddate,7) = '2018-01' and classification like '%Farmer%' )
+	and (case when conta_sem_hunter = 1 and classification not like '%Farmer%' and classification not like '%Híbrido%' and classification not like '%Pacotes%' then 
+	dateadd(minutes,-1,'2018-01-01')  else enddate end ) >= startdate
+order by 1;
+
+
+select *
+into #t_hist_all
+from (
+	select
+		accountid
+		,emploeyeeid as ownerid
+		,cast(startdate as date) as startdate
+		,cast(enddate as date) as enddate
+		,'Fora SP/Travel' as classification
+		,sales_team
+		,'outros' as marcozero
+		,0 as conta_sem_hunter
+	from #t_hist2_before_groupon
+	union all
+	select
+		accountid
+		,case when accountid = '001A000000cwEjKIAU'
+					and emploeyeeid in ('a0W0f00000R9Z5UEAV', 'a0WG000000JtrNhMAJ')
+					and cast(startdate as date) between '2018-01-01' and '2018-01-10'
+			then 'a0WG000000JEtcVMAT'
+			else emploeyeeid
+		end as ownerid
+		,cast(startdate as date) as startdate
+		,cast(enddate as date) as enddate
+		,classification
+		,sales_team
+		,marcozero
+		,conta_sem_hunter
+	from #t_hist3_after_groupon
+);
+
+delete from #t_hist_all
+where ownerid = '';
+
+-----------------------------------------------------------------------------
+-- Multiplying records on accounts with shared services
+-- Later calculations will be easier to do (less union queries)
+-----------------------------------------------------------------------------
+select distinct *
+into #account_history
+from (
+	-- Proprietarios espelhados
+	select 
+		acc.accountid, 
+		acc.sharedserviceowner as ownerid,
+		acc_hist.startdate,
+		acc_hist.enddate,
+		'Shared Service - Mirror' as classification,
+		em.sales_team,
+		acc_hist.marcozero,
+		acc_hist.conta_sem_hunter,
+		cast(acc.sharedservicepercent/100.0 as decimal(10,3)) as sharedservicepercent
+	from reports.com_account acc
+	left join #t_hist_all acc_hist on acc.accountid = acc_hist.accountid
+	left join reports.dm_employee em on acc.sharedserviceowner = em.employee_sf_code and em.active_dw_version = 'Y'
+	where sharedserviceowner <> ''
+	-------------
+	union
+	-------------
+	-- Owners das contas com shared service
+	select 
+		acc.accountid, 
+		acc_hist.ownerid,
+		acc_hist.startdate,
+		acc_hist.enddate,
+		'Shared Service - Owner' as classification,
+		acc_hist.sales_team,
+		acc_hist.marcozero,
+		acc_hist.conta_sem_hunter,
+		cast((100 - acc.sharedservicepercent)/100.0 as decimal(10,3)) as sharedservicepercent
+	from reports.com_account acc
+	left join #t_hist_all acc_hist on acc.accountid = acc_hist.accountid
+	where sharedserviceowner <> ''
+	-------------
+	union
+	-------------
+	-- Contas sem shared service
+	select 
+		acc.accountid, 
+		acc_hist.ownerid,
+		acc_hist.startdate,
+		acc_hist.enddate,
+		acc_hist.classification,
+		acc_hist.sales_team,
+		acc_hist.marcozero,
+		acc_hist.conta_sem_hunter,
+		null as sharedservicepercent
+	from reports.com_account acc
+	left join #t_hist_all acc_hist on acc.accountid = acc_hist.accountid
+	where sharedserviceowner = '' or sharedserviceowner is null
+);
+
+
+-- Ajustando a movimentação de contas com a mesma pessoa em alguns momentos com mais de uma vigência aberta
+-- Casos capturados na #t_rank_pos
+drop table if exists #t_rank_pos;
+
+select
+	h.accountid + h.ownerid + h.classification as chave,
+	h.accountid, 
+	h.ownerid, 
+	h.startdate,
+	h.enddate,
+	h.classification,
+	h.sales_team,
+	h.marcozero,
+	h.conta_sem_hunter,
+	h.sharedservicepercent,
+	rank() over (partition by h.accountid, h.ownerid, h.classification order by h.startdate, h.enddate)
+into #t_rank_pos
+from #account_history h
+inner join (select accountid, ownerid, classification
+		from #account_history
+		where startdate = '2018-01-01'
+		group by accountid, ownerid, startdate, classification
+		having count(*) > 1) x on h.accountid = x.accountid and h.ownerid = x.ownerid and h.classification = x.classification
+where h.startdate = '2018-01-01'
+order by 1, 2, 4;
+
+delete from #account_history 
+where startdate = '2018-01-01'
+	and accountid + ownerid + classification in (select chave from #t_rank_pos);
+
+insert into #account_history
+select 
+	r1.accountid, 
+	r1.ownerid, 
+	coalesce(r2.enddate, r1.startdate) as startdate,
+	r1.enddate,
+	r1.classification,
+	r1.sales_team,
+	r1.marcozero,
+	r1.conta_sem_hunter,
+	r1.sharedservicepercent
+from #t_rank_pos r1
+left join #t_rank_pos r2 on r1.accountid = r2.accountid 
+						and r1.ownerid = r2.ownerid 
+						and r1.classification = r2.classification 
+						and r1."rank" = (r2."rank" + 1)
+order by 1, 2, 4;
+
+update #account_history
+	set enddate = '2018-01-01'
+from reports.com_account
+where #account_history.accountid = reports.com_account.accountid
+	and #account_history.startdate < '2018-01-01'
+	and #account_history.enddate = '2099-01-01'
+	and reports.com_account.conta_sem_farmer = 0;
+
+-- Fechando vigência de contas que não entraram no log
+update #account_history
+set enddate = startdate
+from reports.com_account
+where #account_history.accountid = reports.com_account.accountid
+	and #account_history.accountid in ('0010f00002IQYjZAAX',
+	'001G000001p5jfoIAA','001G000000n9kWpIAI','001G000000nCd8GIAS','0010f00002H3FdhAAF','001A000000Tqt24IAB','001G000001yFap1IAC',
+	'001G0000023bfSWIAY','001G000001xUJSpIAO','001G000001m4AGFIA2','001G000001s2ayGIAQ','001G000000kJnkaIAC','001G000001poBjcIAE',
+	'0010f00002EA3q9AAD','001G000001rNBibIAG','001G000000fCqabIAC','001G0000017lS9KIAU','0010f00002GQRmpAAH','001G000001vDH5QIAW',
+	'001G000001nUJ9CIAW','0010f00002IQceTAAT','001G000000xmXITIA2','0010f00002EAuIdAAL','001G0000025XzblIAC','0010f00002Flpj9AAB',
+	'0010f00002IriirAAB','0010f00002GiQm5AAF','001G000001wfnDRIAY','001G000001hQ8WjIAK','001G0000022CVA5IAO','001G0000020aV0MIAU',
+	'001G000001nTdX3IAK','0010f00002Irf7pAAB','0010f00002GlZAVAA3','001G0000024qsMYIAY','0010f00002I4q8bAAB','001G000001zE060IAC',
+	'001G000001zezQJIAY','001G000000zxzh0IAA','0010f00002IKctZAAT','0010f00002E8ge2AAB','001G0000026TSldIAG','0010f00002HQ8O7AAL',
+	'001G000001o1cERIAY','001G000000zH6JBIA0','001G000001yHEvtIAG','001G000001uZRlaIAG','0010f00002IrsLkAAJ','0010f00002HQyd2AAD')
+	and #account_history.enddate = '2099-01-01'
+	and left(#account_history.startdate, 7) = '2018-01'
+	and #account_history.classification not like 'Shared Service%'
+	and #account_history.ownerid <> reports.com_account.proprietario_compartilhado 
+	and #account_history.ownerid <> reports.com_account.proprietario_compartilhado_farmer;
+
+update #account_history
+set enddate = startdate
+where 1 = 1 
+	and accountid in ('0010f00002I4q8bAAB','001G0000023dmOGIAY','001G0000022CVA5IAO',
+	'001G000001wfnDRIAY','001G0000025XzblIAC')
+and enddate = '2099-01-01'
+and classification = 'Fora SP/Travel';
+
+-- Fechando vigência de contas que estavam com 2 owners em aberto até 22/02, causando duplicidade nos valores
+update #account_history
+set enddate = '2018-01-01'
+where 1 = 1 
+	and accountid in ('0010f00002IrqCpAAJ','0010f00002IrrR8AAJ','001G000000uaqnDIAQ',
+	'001G0000014wtSsIAI','001G000001wOzSeIAK','001G000001wQyw1IAC')
+and enddate = '2018-02-22'
+and classification = 'Fora SP/Travel';
+
+vacuum #account_history;
+analyze #account_history;
+
+drop table if exists reports.com_account_history;
+create table reports.com_account_history
+(
+	accountid varchar(18),
+	ownerid varchar(18),
+	startdate date,
+	enddate date,
+	classification varchar(150),
+	sales_team varchar(150),
+	sharedservicepercent decimal(10,2),
+	date_dw_load datetime
+)
+distkey(accountid)
+sortkey(accountid, startdate, enddate, ownerid);
+
+insert into reports.com_account_history
+select 
+	accountid,
+	ownerid,
+	startdate,
+	enddate,
+	classification,
+	sales_team,
+	sharedservicepercent,
+	getdate()
+from #account_history;
+
+analyze reports.com_account_history;
+
+grant all privileges on table reports.com_account_history to group bi_group;
+grant all privileges on table reports.com_account_history to group bi_group_r;
+-----------------------------------------------------------------------------
+-- Step 030
+-- Prepare table with offer historical changes
+-----------------------------------------------------------------------------
+drop table if exists #t_offer_history;
+
+-----------------------------------------------------------------------------
+-- Some UNIKO offers had wrong owners on Jan/2018 due to Groupon + PU migration
+-- The query below is hard coded for this specific reason
+-----------------------------------------------------------------------------
+select
+	off_hist.parentid
+	,case when off_hist.parentid in ('a0p0f00000Ca5KKAAZ', 'a0p0f00000Ca5QdAAJ', 'a0p0f00000Ca5M1AAJ', 'a0p0f00000Ca5InAAJ',
+						'a0p0f00000Ca5NxAAJ', 'a0pG000000A83SKIAZ', 'a0pG0000009su4vIAA', 'a0pG0000006akbbIAA',
+						'a0pG00000089CgkIAE', 'a0pG0000006akCgIAI', 'a0pG0000008BtIWIA0', 'a0pG0000007KfZDIA0',
+						'a0pG0000006akNyIAI', 'a0pG0000007QxQnIAK', 'a0pG0000007uKz1IAE', 'a0pG0000006akZkIAI',
+						'a0pG0000008BkLfIAK', 'a0pG0000008BnX1IAK', 'a0pG0000007JdA5IAK', 'a0pG00000094IkiIAE',
+						'a0pG0000007uKlGIAU', 'a0pG0000007QoGcIAK', 'a0pG00000088hntIAA', 'a0pG0000007uL2YIAU',
+						'a0pG0000007syDoIAI', 'a0pG000000A7wGJIAZ', 'a0pG000000A7wKGIAZ', 'a0pG0000007syA1IAI',
+						'a0pG0000008BtDbIAK', 'a0pG000000A7wKLIAZ', 'a0pG000000A8728IAB', 'a0pG000000880IBIAY',
+						'a0pG0000007JdGcIAK')
+			and off_hist.startdate between '2018-01-01' and '2018-01-10'
+		then 'a0WG000000JEtcVMAT'
+		else off_hist.sfownerid
+	end as sfownerid
+	,case when off_hist.parentid in ('a0p0f00000Ca5KKAAZ', 'a0p0f00000Ca5QdAAJ', 'a0p0f00000Ca5M1AAJ', 'a0p0f00000Ca5InAAJ',
+						'a0p0f00000Ca5NxAAJ', 'a0pG000000A83SKIAZ', 'a0pG0000009su4vIAA', 'a0pG0000006akbbIAA',
+						'a0pG00000089CgkIAE', 'a0pG0000006akCgIAI', 'a0pG0000008BtIWIA0', 'a0pG0000007KfZDIA0',
+						'a0pG0000006akNyIAI', 'a0pG0000007QxQnIAK', 'a0pG0000007uKz1IAE', 'a0pG0000006akZkIAI',
+						'a0pG0000008BkLfIAK', 'a0pG0000008BnX1IAK', 'a0pG0000007JdA5IAK', 'a0pG00000094IkiIAE',
+						'a0pG0000007uKlGIAU', 'a0pG0000007QoGcIAK', 'a0pG00000088hntIAA', 'a0pG0000007uL2YIAU',
+						'a0pG0000007syDoIAI', 'a0pG000000A7wGJIAZ', 'a0pG000000A7wKGIAZ', 'a0pG0000007syA1IAI',
+						'a0pG0000008BtDbIAK', 'a0pG000000A7wKLIAZ', 'a0pG000000A8728IAB', 'a0pG000000880IBIAY',
+						'a0pG0000007JdGcIAK')
+				and off_hist.startdate = '2018-01-06'
+		then '2018-01-01'
+		else off_hist.startdate
+	end as startdate
+	,case when off_hist.parentid in ('a0p0f00000Ca5KKAAZ', 'a0p0f00000Ca5QdAAJ', 'a0p0f00000Ca5M1AAJ', 'a0p0f00000Ca5InAAJ',
+						'a0p0f00000Ca5NxAAJ', 'a0pG000000A83SKIAZ', 'a0pG0000009su4vIAA', 'a0pG0000006akbbIAA',
+						'a0pG00000089CgkIAE', 'a0pG0000006akCgIAI', 'a0pG0000008BtIWIA0', 'a0pG0000007KfZDIA0',
+						'a0pG0000006akNyIAI', 'a0pG0000007QxQnIAK', 'a0pG0000007uKz1IAE', 'a0pG0000006akZkIAI',
+						'a0pG0000008BkLfIAK', 'a0pG0000008BnX1IAK', 'a0pG0000007JdA5IAK', 'a0pG00000094IkiIAE',
+						'a0pG0000007uKlGIAU', 'a0pG0000007QoGcIAK', 'a0pG00000088hntIAA', 'a0pG0000007uL2YIAU',
+						'a0pG0000007syDoIAI', 'a0pG000000A7wGJIAZ', 'a0pG000000A7wKGIAZ', 'a0pG0000007syA1IAI',
+						'a0pG0000008BtDbIAK', 'a0pG000000A7wKLIAZ', 'a0pG000000A8728IAB', 'a0pG000000880IBIAY',
+						'a0pG0000007JdGcIAK')
+				and off_hist.enddate = '2018-01-05'
+		then '2017-12-31'
+		else off_hist.enddate
+	end as enddate
+into #t_offer_history
+from reports.sfofferhistory_owner off_hist (nolock);
+
+drop table if exists reports.com_offer_history;
+create table reports.com_offer_history
+(
+	offerid varchar(18),
+	ownerid varchar(18),
+	startdate date,
+	enddate date,
+	sales_team varchar(150),
+	date_dw_load datetime
+)
+distkey(offerid)
+sortkey(offerid, startdate, enddate, ownerid);
+
+insert into reports.com_offer_history
+select 
+	off_hist.parentid,
+	off_hist.sfownerid,
+	off_hist.startdate,
+	off_hist.enddate,
+	em.sales_team,
+	getdate()
+from #t_offer_history off_hist
+left join reports.dm_employee em (nolock) on off_hist.sfownerid = em.employee_sf_code and em.active_dw_version = 'Y';
+
+analyze reports.com_offer_history;
+
+grant all privileges on table reports.com_offer_history to group bi_group;
+grant all privileges on table reports.com_offer_history to group bi_group_r;
+-----------------------------------------------------------------------------
+-- Step 040
+-- Prepare table with New Partnes
+-- It might be used only for commercial commission
+-----------------------------------------------------------------------------
+----------------------------------------------------------------------------------------------
+-- IDENTIFICAÇÃO DE PARCEIRO NOVO
+-- Adaptação do script criado pelo Luis Perozin
+----------------------------------------------------------------------------------------------
+drop table if exists #temp0;
+drop table if exists #temp_x;
+drop table if exists #temp1;
+drop table if exists #temp2;
+drop table if exists #ajuste;
+drop table if exists #tmp_new_partner;
+
+/*identifica a primeira venda,primeira publicação,data expiração de cada oferta por parceiro*/
+with sc as (
+	select  sc.unifieddiscountid
+		   ,min(sc.startdate) as publishing_start
+		   ,max(sc.enddate)   as publishing_end
+		from reports.unifieddiscountscheduling	sc 
+		group by sc.unifieddiscountid
+		having max(sc.enddate) >= cast('2018-01-01' as date)
+)
+select 
+  acc.accountid
+ ,acc.accountname
+ ,dl.contract_number
+ ,udis.ContractId
+ ,dl.idoferta as idoferta
+ ,dr.unifieddiscountid
+ ,dl.phoenix_type
+ ,min(dr.eventdate) as publishing_date_min
+ ,max(left(dl.expiration_date,10)) as last_expiration_date
+into #temp0
+from ods.mng_deals_latest dl (nolock)
+LEFT JOIN  sc ON dl.legacydata_unified_discount_id=sc.unifieddiscountid
+left join reports.discountrevenue dr (nolock)    on dl.legacydata_unified_discount_id=dr.unifieddiscountid
+left join ods.UnifiedDiscount udis (nolock)	     on udis.UnifiedDiscountID = dr.UnifiedDiscountID
+left join ods.discount dis (nolock)              on dis.discountid = dr.discountid
+left join reports.Contract con (nolock)	on con.ContractId = udis.ContractID
+left join reports.Account acc (nolock)	on acc.AccountID = con.AccountID
+where 1 = 1
+and dr.grosssales> 0
+group by 1,2,3,4,5,6, 7
+having min(dr.eventdate) > 0;
+
+select 
+	accountname
+	,accountid
+	,phoenix_type
+	,ContractId
+	,contract_number
+	,publishing_date_min
+	,coalesce(last_expiration_date,'2001-01-01') as last_expiration_date
+	,min(idoferta) as idoferta
+into #temp_x
+from #temp0
+group by 1, 2, 3, 4, 5, 6, 7
+;
+
+select 
+	accountname
+	,accountid
+	,phoenix_type
+	,case when publishing_date_min < '2018-01-01' then '2018-01-01' else publishing_date_min end as publishing_date_min
+	,last_expiration_date
+	,rank_frst
+	,rank_exp
+	,min(ContractId) as ContractId
+	,min(contract_number) as contract_number
+into #temp1
+from (
+	select 
+		accountname
+		,accountid
+		,phoenix_type
+		,publishing_date_min
+		,last_expiration_date
+		,(ContractId) as ContractId
+		,(contract_number) as contract_number
+		,RANK () OVER ( PARTITION BY accountname ORDER BY publishing_date_min,ContractId,contract_number ) as rank_frst
+		,RANK () OVER ( PARTITION BY accountname ORDER BY publishing_date_min,last_expiration_date,ContractId,contract_number )+1 as rank_exp
+	from #temp_x
+	group by 1, 2, 3, 4, 5, 6, 7
+	)
+group by 1, 2 , 3, 4, 5, 6, 7
+order by 5
+;
+
+SELECT  
+	T1.accountname
+	,T1.accountid
+	,T1.publishing_date_min
+	,coalesce(T2.last_expiration_date,'2001-01-01') as last_expiration_date
+	,T1.rank_frst
+	,DATEDIFF(DAY,cast((coalesce(T2.last_expiration_date,'2001-01-01')) as date),cast(T1.publishing_date_min as date)) x
+	,case when DATEDIFF(DAY,cast((coalesce(T2.last_expiration_date,'2001-01-01')) as date),cast(T1.publishing_date_min as date)) < 0 then 0 else 
+	   DATEDIFF(DAY,cast(coalesce(T2.last_expiration_date,'2001-01-01') as date),cast(T1.publishing_date_min as date)) end as Qty_Days
+	,case when DATEDIFF(DAY,cast((coalesce(T2.last_expiration_date,'2001-01-01')) as date),cast(T1.publishing_date_min as date))  > (case T1.phoenix_type when 'Viagens' then 180 else 90 end) then 'Y' else 'N' end as isNewPartner 
+	,case when DATEDIFF(DAY,cast((coalesce(T2.last_expiration_date,'2001-01-01')) as date),cast(T1.publishing_date_min as date))  > (case T1.phoenix_type when 'Viagens' then 180 else 90 end) then cast(T1.publishing_date_min as date) end as Date_as_NewPartner
+	,T1.ContractId
+	,T1.contract_number
+INTO #TEMP2  
+FROM #TEMP1 T1
+LEFT JOIN #TEMP1 T2 ON (T1.accountid = T2.accountid and T1.rank_frst = t2.rank_exp)
+;
+
+/* Ajuste para pegar a primeira publicação de 2018 caso a conta não estivesse dentro da regra de conta nova e voltando a data para 01-01-2018 */
+/* Primeira publicação depois da data forçada */
+select 
+	accountname, 
+	min(cast(publishing_date_min as date)) first_publish
+into #ajuste
+from #temp2
+where accountid in (
+				/* Contas que foram novas em 2018-01-01 (forçadas)*/
+				select
+					accountid
+				from #temp2
+				where isnewpartner = 'Y'
+				group by accountid
+				having max(date_as_newpartner) = '2018-01-01')
+	and publishing_date_min > '2018-01-01'
+group by accountname;
+
+select
+	accountname
+	,isNewPartner
+	,max(Date_as_NewPartner) Date_as_NewPartner
+	,max(Qty_Days) Qty_Days
+into #tmp_new_partner
+from #TEMP2 T2
+left join salesforce.cfaccount acc (nolock) on T2.accountid = acc.id
+inner join reports.dm_employee em (nolock) on left(acc.propriet_rio_compartilhado, 15) = left(em.employee_sf_code, 15) 
+										and em.active_dw_version = 'Y'
+where 1 = 1
+	and Date_as_NewPartner >= '2018-01-01'
+	and isNewPartner = 'Y'
+	and em.sales_director = 'Vagner Wolfart'
+	and em.classification like '%Hunter%'
+group by 1, 2;
+
+delete from reports.gpn_new_partners;
+
+insert into reports.gpn_new_partners
+(select 
+	np.accountname,
+	np.isnewpartner,
+	coalesce(aj.first_publish, np.date_as_newpartner) date_as_newpartner,
+	np.qty_days
+from #tmp_new_partner np
+left join #ajuste aj on np.accountname = aj.accountname)
+;
+
+--------------------------------------------------------------------------------------------------------------------------
+
+
+/*
+ * Script para classificação de parceiro novo
+ * criado por lperozin
+ * data: 2017-12-14
+ * 
+ * */
+
+drop table if exists #temp0;
+drop table if exists #temp_x;
+drop table if exists #temp1;
+drop table if exists #temp2;
+drop table if exists #temp3;
+
+
+/*identifica a primeira venda,primeira publicação,data expiração de cada oferta por parceiro*/
+with sc as (
+	select  sc.unifieddiscountid
+		   ,min(sc.startdate) as publishing_start
+		   ,max(sc.enddate)   as publishing_end
+		from reports.unifieddiscountscheduling	sc 
+		group by sc.unifieddiscountid
+		having max(sc.enddate) >= cast('2017-10-01' as date)
+)
+select 
+  acc.accountid
+ ,acc.accountname
+ ,dl.contract_number
+ ,udis.ContractId
+ ,dl.idoferta as idoferta
+ ,dr.unifieddiscountid 
+ ,min(publishing_start) as publishing_date_min
+ ,min(dr.eventdate) as frst_sale
+ ,max(left(dl.expiration_date,10)) as last_expiration_date
+into #temp0
+from ods.mng_deals_latest dl (nolock)
+LEFT JOIN  sc ON dl.legacydata_unified_discount_id=sc.unifieddiscountid
+left join reports.discountrevenue dr (nolock)    on dl.legacydata_unified_discount_id=dr.unifieddiscountid
+left join ods.UnifiedDiscount udis (nolock)	     on udis.UnifiedDiscountID = dr.UnifiedDiscountID
+left join ods.discount dis (nolock)              on dis.discountid = dr.discountid
+left join reports.Contract con (nolock)	on con.ContractId = udis.ContractID
+left join reports.Account acc (nolock)	on acc.AccountID = con.AccountID
+where 1 = 1
+and dr.grosssales> 0
+group by 1,2,3,4,5,6
+having min(dr.eventdate) > 0;
+ 
+select 
+  accountid
+ ,accountname
+ ,ContractId
+ ,contract_number
+ ,publishing_date_min
+ ,frst_sale
+ ,coalesce(last_expiration_date,'2001-01-01') as last_expiration_date
+ ,min(idoferta) as idoferta
+ into #temp_x
+from #temp0
+where 1 = 1 
+group by 1,2,3,4,5,6,7;
+
+/**/
+select 
+ accountid
+,accountname
+,publishing_date_min
+,frst_sale
+,last_expiration_date
+,rank_frst
+,rank_exp
+,min(ContractId) as ContractId
+,min(contract_number) as contract_number
+into #temp1
+from (
+select 
+ accountid
+,accountname
+,publishing_date_min
+,frst_sale
+,last_expiration_date
+,(ContractId) as ContractId
+,(contract_number) as contract_number
+,RANK () OVER ( PARTITION BY accountname ORDER BY publishing_date_min,frst_sale,ContractId,contract_number ) as rank_frst
+,RANK () OVER ( PARTITION BY accountname ORDER BY publishing_date_min,frst_sale,last_expiration_date,ContractId,contract_number )+1 as rank_exp
+from #temp_x
+group by 1,2,3,4,5,6,7
+)
+group by 1,2,3,4,5,6,7
+order by 6
+;
+
+SELECT  
+  T1.accountid
+ ,T1.accountname
+ ,T1.publishing_date_min
+ ,T1.frst_sale
+ ,coalesce(T2.last_expiration_date,'2001-01-01') as last_expiration_date
+ ,T1.rank_frst
+ ,DATEDIFF(DAY,cast((coalesce(T2.last_expiration_date,'2001-01-01')) as date),cast(T1.frst_sale as date)) x
+ ,case when DATEDIFF(DAY,cast((coalesce(T2.last_expiration_date,'2001-01-01')) as date),cast(T1.frst_sale as date)) < 0 then 0 else 
+   DATEDIFF(DAY,cast(coalesce(T2.last_expiration_date,'2001-01-01') as date),cast(T1.frst_sale as date)) end as Qty_Days
+ ,case when DATEDIFF(DAY,cast((coalesce(T2.last_expiration_date,'2001-01-01')) as date),cast(T1.frst_sale as date))  > 365 then 'Y' else 'N' end as isNewPartner 
+ ,case when DATEDIFF(DAY,cast((coalesce(T2.last_expiration_date,'2001-01-01')) as date),cast(T1.frst_sale as date))  > 365 then cast(T1.frst_sale as date) end as Date_as_NewPartner
+ ,T1.ContractId
+ ,T1.contract_number
+INTO #TEMP2  
+FROM #TEMP1 T1
+LEFT JOIN #TEMP1 T2 ON T1.accountname = T2.accountname  and T1.rank_frst = t2.rank_exp
+where 1 = 1;
+
+select distinct accountid,accountname,isNewPartner,Date_as_NewPartner,Qty_Days
+into #temp3 
+from #TEMP2 where isNewPartner = 'Y';
+
+drop table if exists reports.newpartner;
+
+create table reports.newpartner (
+accountid   varchar(18),
+accountname  varchar(300),
+isnewpartner  varchar(1),
+date_as_newpartner  date,
+qty_days  int
+)
+distkey(accountname)
+sortkey(accountid, accountname);
+
+insert into reports.newpartner      
+select *from #temp3;                                  
+
+analyze reports.newpartner;
+
+grant all privileges on table reports.newpartner to group bi_group;
+grant all privileges on table reports.newpartner to group bi_group_r;
+--------------------------------------------------------------------------------------------------------------------------
+
+-------------------------------------------------------------------------------
+-- DROP TEMP TABLES USED WITHIN THE PROCESS
+-------------------------------------------------------------------------------
+drop table if exists #tmp_actual_values;
+
+create table #tmp_actual_values
+(
+	datasource smallint,
+	eventdate date,
+	discountid integer,
+	unifieddiscountid integer,
+	optionid varchar(18),
+	offerid varchar(18),
+	salesforcecontractid varchar(18),
+	accountid varchar(18),
+	sourceid smallint,
+	channelid smallint,
+	ownerid varchar(18),
+	sharedservicepercent decimal(10,3),
+	qtycoupons integer,
+	grosssales decimal(18,2),
+	grosssalespucommission decimal(18,2),
+	noshow decimal(18,2),
+	ammounttopartner decimal(18,2),
+	promocodes decimal(18,2),
+	financecharge decimal(18,2),
+	antifraudfee decimal(18,2),
+	aquirerfee decimal(18,2),
+	anticipationcost decimal(18,2),
+	taxes decimal(18,2),
+	extrafees decimal(18,2),
+	extrafeespu decimal(18,2),
+	administrativefee decimal(18,2),
+	cancelledposbilling decimal(18,2),
+	cancelledprebilling decimal(18,2),
+	cancelledprebillingpu decimal(18,2),
+	cancelledposbillingpu decimal(18,2),
+	cancellationfinancecharge decimal(18,2),
+	cancellationextrafees decimal(18,2),
+	cancellationextrafeespu decimal(18,2),
+	cancellationpromocodes decimal(18,2),
+	administrativefeecancelled decimal(18,2),
+	GMV decimal(18,2),
+	ROL decimal(18,2),
+	GrossProfit decimal(18,2),
+	NewGrossRevenue decimal(18,2),
+	NewGrossProfit decimal(18,2)
+)
+distkey(eventdate)
+sortkey(eventdate, unifieddiscountid, optionid, offerid, salesforcecontractid, accountid)
+;
+-------------------------------------------------------------------------------
+-- CREATE TEMP TABLE WITH ALL THE METRICS
+-- Historical and shared owner/percent is identified here
+-- Dimension natural ID's included on this table (account, contract, offer, option and owner)
+-------------------------------------------------------------------------------
+insert into #tmp_actual_values
+select
+	1 "datasource"
+	, 	dr.eventdate "eventdate"
+	,	dr.discountid "discountid"
+	,	dr.unifieddiscountid "unifieddiscountid"
+	,	op.id "optionid"
+	,	isnull(offer.id, offer2.id) "offerid"
+	,	ct.salesforcecontractid
+	,	ac.accountid
+	,	dr.sourceid
+	,	dr.channelid
+	,	case when sfofferh.sales_team = 'Key Account (E-commerce)' or sfacch.sales_team = 'Key Account (E-commerce)'
+			then sfofferh.ownerid
+			else
+				case when ac.iscalculatedbycontract = 1 and (sfacch.sales_team not like 'Sao Paulo%' and sfacch.sales_team not like '%Turismo%')
+														or  (ac.accountid = '001G000001nOluxIAC' and ct.contractid = 190809)
+					then ct.Proprietario_compartilhado
+					else sfacch.ownerid
+				end
+		end "OwnerID"
+	,	case when dr.eventdate < '2018-01-01' and sfacch.sharedservicepercent is null --antes das contas serem distribuídas para o groupon e sem shared service
+			then 1
+			else sfacch.sharedservicepercent 
+		end as sharedservicepercent
+	,	sum(dr.qtycoupons) "qtycoupons"
+	,	sum(dr.grosssales) "grosssales"
+	,	sum(dr.grosssalespucommission) "grosssalespucommission"
+	,	sum(dr.noshow) "noshow"
+	,	sum(dr.ammounttopartner) "ammounttopartner"
+	,	sum(dr.promocodes) "promocodes"
+	,	sum(dr.financecharge) "financecharge"
+	,	sum(dr.antifraudfee) "antifraudfee"
+	,	sum(dr.aquirerfee) "aquirerfee"
+	,	sum(dr.anticipationcost) "anticipationcost"
+	,	sum(dr.taxes) "taxes"
+	,	sum(dr.extrafees) "extrafees"
+	,	sum(dr.extrafeespu) "extrafeespu"
+	,	sum(dr.administrativefee) "administrativefee"
+	,	sum(dr.cancelledposbilling) "cancelledposbilling"
+	,	sum(dr.cancelledprebilling) "cancelledprebilling"
+	,	sum(dr.cancelledprebillingpu) "cancelledprebillingpu"
+	,	sum(dr.cancelledposbillingpu) "cancelledposbillingpu"
+	,	sum(dr.cancellationfinancecharge) "cancellationfinancecharge"
+	,	sum(dr.cancellationextrafees) "cancellationextrafees"
+	,	sum(dr.cancellationextrafeespu) "cancellationextrafeespu"
+	,   sum(dr.cancellationpromocodes) "cancellationpromocodes"
+	,	sum(dr.administrativefeecancelled) "administrativefeecancelled"
+	,   sum(dr.grosssales + dr.extrafees + dr.financecharge) "GMV"
+	,   sum((dr.grosssalespucommission + dr.NoShow + dr.financecharge + dr.extrafeespu + dr.administrativefee) - 
+		   (dr.CancelledPreBillingPU + dr.cancelledposbillingpu + dr.cancellationextrafeespu + dr.cancellationfinancecharge + dr.administrativefeecancelled)) "ROL"
+	,   sum((dr.grosssalespucommission + dr.NoShow + dr.financecharge + dr.extrafeespu + dr.administrativefee) - 
+		   (dr.CancelledPreBillingPU + dr.cancelledposbillingpu + dr.cancellationextrafeespu + dr.cancellationfinancecharge + dr.administrativefeecancelled) -
+		   (dr.aquirerfee + dr.antifraudfee + dr.promocodes + dr.anticipationcost - dr.cancellationpromocodes)) "grossprofit"
+	,	sum(case when np.accountname is not null 
+					and dr.eventdate between np.date_as_newpartner and dateadd(day,90,np.date_as_newpartner) 
+				then dr.grosssalespucommission 
+				else 0 
+			end) "NewGrossRevenue"
+	,   sum(case when np.accountname is not null 
+					and dr.eventdate between np.date_as_newpartner and dateadd(day,90,np.date_as_newpartner) 
+				then (dr.grosssalespucommission + dr.NoShow + dr.financecharge + dr.extrafeespu + dr.administrativefee) - 
+		   			 (dr.CancelledPreBillingPU + dr.cancelledposbillingpu + dr.cancellationextrafeespu + dr.cancellationfinancecharge + dr.administrativefeecancelled) -
+		  			 (dr.aquirerfee + dr.antifraudfee + dr.promocodes + dr.anticipationcost - dr.cancellationpromocodes)
+		  		else 0
+		  	end) "NewGrossProfit"
+from reports.DiscountRevenue dr (nolock)
+left join ods.Discount dis (nolock) on dis.DiscountID = dr.DiscountID
+left join ods.UnifiedDiscount udis (nolock) on dr.UnifiedDiscountID = udis.UnifiedDiscountID
+left join salesforce.ctOp_es_de_Compra op (nolock) on op.C_digo_Opcao_N_merico = dis.IdOpcaoDeCompra
+left join salesforce.ctOfertas offer (nolock) on offer.Id = op.Id_da_Oferta
+left join salesforce.ctOfertas offer2 (nolock) on offer2.c_digo_oferta_num_rico = udis.Idoferta
+left join reports.com_contract ct on udis.ContractId = ct.contractid
+left join reports.com_account ac on ac.AccountID = ct.AccountID
+left join reports.com_account_history sfacch on (sfacch.accountid = ac.accountid
+									and sfacch.startdate <= dr.eventdate
+									and sfacch.enddate > dr.eventdate)
+left join reports.com_offer_history sfofferh on (sfofferh.offerid = offer2.id
+									and sfofferh.startdate <= dr.eventdate
+									and sfofferh.enddate >= dr.eventdate)
+left join reports.newpartner np (nolock) on (ac.accountid = np.accountid
+									and dr.eventdate between np.date_as_newpartner and dateadd(day,90,np.date_as_newpartner))
+where 1 = 1
+	and eventdate between left(dateadd(month, -13, getdate() - 1), 7) + '-01' and cast(getdate() - 1 as date)
+group by 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12
+;
+
+analyze #tmp_actual_values;
+
+------------------------------------------------------------
+-- STEP 02
+------------------------------------------------------------
+
+drop table if exists #discount_name;
+drop table if exists #cancellation_discount_before_2012;
+--drop table if exists #tmp_CargaGrossProfit_step02;
+
+/* Retorna o menor discount name */
+select
+	dis.UnifiedDiscountID
+	,	min(DiscountName) DiscountName
+into #discount_name
+from ods.Discount dis (nolock)
+group by
+	dis.UnifiedDiscountID;
+
+/* Retorna os unified discount ID's que devem ser desconsiderados nos cancellations pos billing */
+select
+	dis.UnifiedDiscountID
+	,	min(dr.EventDate) MinEventDate
+into #cancellation_discount_before_2012
+from reports.DiscountRevenue dr (nolock)
+left join ods.Discount dis (nolock)
+	on dr.DiscountID = dis.DiscountID
+where dr.GrossSales > 0
+group by
+	dis.UnifiedDiscountID
+having min(dr.EventDate) < '2012-08-01';
+
+drop table if exists reports.com_finance_actual_history_changes;
+
+create table reports.com_finance_actual_history_changes
+(
+	EventDate date
+	,EventYear smallint
+	,EventMonth smallint
+	,EventDay smallint
+	,Owner varchar(150)
+	,Executive_classification varchar(150)
+	,OwnerERP varchar(150)
+	,Coordinator varchar(150)
+	,Manager varchar(150)
+	,Region varchar(150)
+	,Team varchar(150)
+	,Politica varchar(150)
+	,ContractID int
+	,UnifiedDiscountID int
+	,DiscountName varchar(500)
+	,offerid varchar(18)
+	,IdOferta varchar(150)
+	,PurchaseOption varchar(18)
+	,accountid varchar(18)
+	,AccountName varchar(250)
+	,sourceid int
+	,channelid int
+	,CategoryName varchar(250)
+	,IsCalculatedBycontract smallint
+	,HasSharedService smallint
+	,DiscountedValue decimal(18,2)
+	,sharedservicepercent decimal(10,2)
+	,OurCommission decimal(18,2)
+	,DealsClub smallint
+	,PaymentCondition varchar(500)
+	,PaymentConditionName varchar(500)
+	,Subdivision varchar(500)
+	,Type_Site varchar(150)
+	,Category_Site varchar(150)
+	,SubCategory_Site varchar(150)
+	,subsubcategory_site varchar(150)
+	,UseNow int
+	,DealCity varchar(150)
+	,QtyCoupons int
+	,GrossSales decimal(18,2)
+	,GrossSalesWithExtraFeesPU decimal(18,2)
+	,GrossSalesPUCommission decimal(18,2)
+	,CommercialCancelledPosBilling decimal(18,2)
+	,CancelledPreBilling decimal(18,2)
+	,CancelledPreBillingPU decimal(18,2)
+	,NoShow decimal(18,2)
+	,CancelledPosBillingPU decimal(18,2)
+	,ammounttopartner decimal(18,2)
+	,promocodes decimal(18,2)
+	,financecharge decimal(18,2)
+	,antifraudfee decimal(18,2)
+	,aquirerfee decimal(18,2)
+	,anticipationcost decimal(18,2)
+	,taxes decimal(18,2)
+	,extrafees decimal(18,2)
+	,extrafeespu decimal(18,2)
+	,cancellationfinancecharge decimal(18,2)
+	,cancellationextrafees decimal(18,2)
+	,cancellationextrafeespu decimal(18,2)
+	,Adjustment decimal(18,2)
+	,cancellationpromocodes decimal(18,2)
+	,administrativefee decimal(18,2)
+	,administrativefeecancelled decimal(18,2)
+	,GMV decimal(18,2)
+	,ROL decimal(18,2)
+	,GrossProfit decimal(18,2)
+	,NewGrossRevenue decimal(18,2)
+	,NewGrossProfit decimal(18,2)
+	,date_dw_load datetime
+)
+distkey(eventdate)
+sortkey(eventdate, unifieddiscountid, PurchaseOption, offerid, contractid, accountid)
+;
+
+/* Main table para o acompanhamento de metas e TMC */
+insert into reports.com_finance_actual_history_changes
+select
+	dr.EventDate
+	,	date_part(year,dr.EventDate) "EventYear"
+	,	date_part(month,dr.EventDate) "EventMonth"
+	,	date_part(day,dr.EventDate) "EventDay"
+	,	coalesce(em.Name, 'Em tratamento') "Owner"
+	,	coalesce(em.classification, 'Em tratamento') "Executive_classification"
+	,	coalesce(ownere.ownerERP, 'Em tratamento') "OwnerERP"
+	,	coalesce(em.sales_coordinator, 'Em tratamento') "Coordinator"
+	,	coalesce(em.sales_manager, 'Em tratamento') "Manager"
+	,	coalesce(em.sales_region, 'Em tratamento') "Region"
+	,	coalesce(em.sales_team, 'Em tratamento') "Team"
+	,	case when np.accountname is not null
+			then cp.CommissionPolicy_desc
+			else 'Parceiro Antigo'
+		end as Politica
+	,	udis.ContractID
+	,	dr.UnifiedDiscountID
+	,	ndis.DiscountName
+	,	dr.offerid
+	,	offer.name "IdOferta"
+	,	op.name "PurchaseOption"
+	,	ac.accountid
+	,	ac.AccountName
+	,	dr.sourceid "sourceid" --inclusão para identificar sites PU/Groupon
+	,	dr.channelid
+	,	case
+			when ct.Category in ('Entretenimento','Entretenimento, Cultura e Vida Noturna','Entretenimento, Cultuta e Vida Noturna','Lazer')
+			then 'Entret. & Lazer'
+			else ct.Category
+		end  "CategoryName"
+	,	ac.iscalculatedbycontract "IsCalculatedBycontract"
+	, 	case when (ac.sharedserviceowner is null or ac.sharedserviceowner = '') 
+			then 0 
+			else 1 
+		end "HasSharedService"
+	,	dis.DiscountedValue
+	,	cast(case when dr.sharedservicepercent is null then 
+				case when np.accountname is not null
+						then coalesce(cp.Perc_Commission, 1)
+						else 
+							case when em.classification like '%Hunter%' then 0 
+								else 1
+							end
+				end
+				else dr.sharedservicepercent
+			end as dec(10,3)) "sharedservicepercent"
+	,	cast(dis.OurCommission as decimal(15,2)) "OurCommission"
+	,	coalesce(ct.DealsClub,0) "DealsClub"
+	,	ct.PaymentCondition
+	,	ct.PaymentConditionName
+	,	coalesce(ct.Subdivision,'Não tem') "Subdivision"
+	,	ct.Type_Site
+	,	case
+			when len(op.categoria_site_oferta) > 1 or op.categoria_site_oferta is not null then op.categoria_site_oferta
+			when len(offer.of_categoria_site) > 1 or offer.of_categoria_site is not null then offer.of_categoria_site
+			else ct.Category_Site
+		end "Category_Site"
+	,	case
+			when len(op.subcategoria_site_oferta) > 1 or op.subcategoria_site_oferta is not null then op.subcategoria_site_oferta
+			when len(offer.of_subcategoria_site) > 1 or offer.of_subcategoria_site is not null then offer.of_subcategoria_site
+			else ct.SubCategory_Site
+		end	"SubCategory_Site"
+	,	case
+			when len(op.sub_subcategoria_site_oferta) > 1 or op.sub_subcategoria_site_oferta is not null then op.sub_subcategoria_site_oferta
+			when len(offer.of_sub_subcategoria_site) > 1 or offer.of_sub_subcategoria_site is not null then offer.of_sub_subcategoria_site
+			else ct.subsub_ct_pu
+		end "subsubcategory_site"
+	,	coalesce(ct.UseNow,0) "UseNow"
+	,	ct.DealCity
+	,	sum(dr.QTYCoupons) "QtyCoupons"
+	,	sum(dr.GrossSales) "GrossSales"
+	,	sum(dr.GrossSales + dr.extrafeespu) "GrossSalesWithExtraFeesPU"
+	,	sum(dr.GrossSalesPUCommission) "GrossSalesPUCommission"
+	,	sum(case when mdis.unifieddiscountid is null then dr.CancelledPosBilling else 0 end) "CommercialCancelledPosBilling"
+	,	sum(dr.CancelledPreBilling) "CancelledPreBilling"
+	,	sum(dr.CancelledPreBillingPU) "CancelledPreBillingPU"
+	,	sum(dr.NoShow) "NoShow"
+	,	sum(dr.CancelledPosBillingPU) "CancelledPosBillingPU"
+	,	sum(dr.ammounttopartner) "ammounttopartner"
+	,	sum(dr.promocodes) "promocodes"
+	,	sum(dr.financecharge) "financecharge"
+	,	sum(dr.antifraudfee) "antifraudfee"
+	,	sum(dr.aquirerfee) "aquirerfee"
+	,	sum(dr.anticipationcost) "anticipationcost"
+	,	sum(dr.taxes) "taxes"
+	,	sum(dr.extrafees) "extrafees"
+	,	sum(dr.extrafeespu) "extrafeespu"
+	,	sum(dr.cancellationfinancecharge) "cancellationfinancecharge"
+	,	sum(dr.cancellationextrafees) "cancellationextrafees"
+	,	sum(dr.cancellationextrafeespu) "cancellationextrafeespu"
+	,	0 "Adjustment" 
+	,	sum(dr.cancellationpromocodes) "cancellationpromocodes"
+	,	sum(dr.administrativefee) "administrativefee"
+	,	sum(dr.administrativefeecancelled) "administrativefeecancelled" 
+	,	sum(dr.GMV) "GMV"
+	,	sum(dr.ROL) "ROL"
+	,	sum(dr.GrossProfit) "GrossProfit"
+	,	sum(dr.NewGrossRevenue) "NewGrossRevenue"
+	,	sum(dr.NewGrossProfit) "NewGrossProfit"
+	,	getdate()
+from #tmp_actual_values dr
+left join ods.Discount dis (nolock) on dr.DiscountID = dis.DiscountID
+left join ods.UnifiedDiscount udis (nolock) on dr.UnifiedDiscountID = udis.UnifiedDiscountID
+left join reports.com_contract ct on dr.salesforcecontractid = ct.salesforcecontractid
+left join reports.com_account ac on dr.AccountID = ac.AccountID
+left join salesforce.ctOp_es_de_Compra op (nolock) on dr.optionid = op.id
+left join salesforce.ctOfertas offer (nolock) on dr.offerid = offer.Id
+left join reports.dm_employee em (nolock) on left(dr.ownerid, 15) = left(em.employee_sf_code, 15)
+							and case when dr.eventdate < '2018-02-01' 
+									then em.active_dw_version = 'Y'
+									else dr.eventdate between em.date_dw_start and em.date_dw_end
+								end
+left join reports.gpn_new_partners np (nolock) on (np.accountName = ac.accountName 
+							and dr.eventdate between np.date_as_newpartner and dateadd(day, 180, np.date_as_newpartner))
+left join reports.dm_commissionpolicy cp (nolock) on (em.commissionpolicy_ID = cp.commissionpolicy_ID
+							and dr.eventdate between dateadd(day, cp.RangeStart, np.date_as_newpartner) and dateadd(day, cp.RangeEnd, np.date_as_newpartner)
+							and dr.eventdate between cp.Date_DW_Start and cp.Date_DW_End)
+left join #discount_name ndis on dr.UnifiedDiscountID = ndis.UnifiedDiscountID
+left join #cancellation_discount_before_2012 mdis on mdis.UnifiedDiscountID = dr.UnifiedDiscountID
+left join reports.ownererp ownere (nolock) on upper(em.name) = upper(ownere.owner)
+where 1 = 1
+group by 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38;
+
+analyze reports.com_finance_actual_history_changes;
+
+grant all privileges on table reports.com_finance_actual_history_changes to group bi_group;
+grant all privileges on table reports.com_finance_actual_history_changes to group bi_group_r;
+
+/**********************************************************************************************/
+/*                   Table used on commercial reports - Acompanhamento de Metas               */
+/*                              Table loaded with current month data                          */
+/**********************************************************************************************/
+drop table if exists reports.com_acompanhamento_detail;
+create table reports.com_acompanhamento_detail 
+(
+	eventyear smallint 
+	,eventmonth smallint 
+	,eventday smallint 
+	,eventdate date
+	,ownererp varchar(255)
+	,executive_classification varchar(150)
+	,coordinator varchar(150)
+	,manager varchar(150)
+	,team varchar(80)
+	,region varchar(33)
+	,categoryname varchar(150)
+	,iscalculatedbycontract smallint
+	,dealsclub int
+	,paymentcondition varchar(500)
+	,paymentconditionname varchar(500)
+	,accountid varchar(18)
+	,accountname varchar(300)
+	,contractid int 
+	,idoferta varchar(18)
+	,purchaseoption varchar(18)
+	,discountname varchar(500)
+	,usenow int
+	,subdivision varchar(500)
+	,category_site varchar(150)
+	,subcategory_site varchar(150)
+	,source_site varchar(12)
+	,politica varchar(150)
+	,hassharedservice smallint 
+	,sharedservicepercent numeric(10,3)
+	,qtycoupons int
+	,grosssales numeric(10,3)
+	,grossrevenue numeric(10,3)
+	,ammounttopartner numeric(10,3)
+	,grosssaleswithextrafees numeric(10,3)
+	,promocodes numeric(10,3)
+	,financecharge numeric(10,3)
+	,antifraudfee numeric(10,3)
+	,aquirerfee numeric(10,3)
+	,anticipationcost numeric(10,3)
+	,taxes numeric(10,3)
+	,extrafees numeric(10,3)
+	,extrafeespu numeric(10,3) 
+	,noshow numeric(10,3)
+	,netrevenue numeric(10,3)
+	,commercialcancelledposbilling numeric(10,3)
+	,cancelledprebilling numeric(10,3)
+	,cancelledprebillingpu numeric(10,3)
+	,cancelledposbillingpu numeric(10,3)
+	,cancellationextrafees numeric(10,3)
+	,cancellationextrafeespu numeric(10,3)
+	,cancellationfinancecharge numeric(10,3)
+	,cancellationpromocodes numeric(10,3) 
+	,administrativefee numeric(10,3) 
+	,administrativefeecancelled numeric(10,3) 
+	,newgrossrevenue numeric(10,3)
+	,newgrossprofit numeric(10,3)
+	,date_dw_load datetime
+)
+distkey(ownererp)
+sortkey(eventdate, ownererp, accountid);
+
+insert into reports.com_acompanhamento_detail
+select 
+	dcr.eventyear
+	,dcr.eventmonth
+	,dcr.eventday
+	,dcr.eventdate
+	,dcr.ownererp
+	,dcr.executive_classification
+	,dcr.coordinator
+	,dcr.manager
+	,dcr.team
+	,dcr."region"
+	,dcr.categoryname
+	,dcr.iscalculatedbycontract
+	,dcr.dealsclub
+	,dcr.paymentcondition
+	,dcr.paymentconditionname
+	,dcr.accountid
+	,dcr.accountname
+	,COALESCE(dcr.contractid, 0) AS contractid
+	,dcr.idoferta
+	,dcr.purchaseoption
+	,btrim(dcr.contractid) + ' - ' + dcr.discountname AS discountname
+	,dcr.usenow
+	,dcr.subdivision
+	,dcr.category_site
+	,dcr.subcategory_site
+	,case
+		when dcr.sourceid in (1, 2, 3) then 'Peixe Urbano'
+		when dcr.sourceid in (4, 5, 6) then 'Groupon'
+	end as source_site
+	,dcr.Politica
+	,dcr.hassharedservice
+	,dcr.sharedservicepercent
+	,sum(dcr.qtycoupons) AS qtycoupons
+	,sum(dcr.sharedservicepercent * dcr.grosssales) AS grosssales
+	,sum(dcr.sharedservicepercent * dcr.grosssalespucommission) AS grossrevenue
+	,sum(dcr.sharedservicepercent * dcr.ammounttopartner) AS ammounttopartner
+	,sum(dcr.sharedservicepercent * dcr.grosssaleswithextrafeespu) AS grosssaleswithextrafees
+	,sum(dcr.sharedservicepercent * dcr.promocodes) AS promocodes
+	,sum(dcr.sharedservicepercent * dcr.financecharge) AS financecharge
+	,sum(dcr.sharedservicepercent * dcr.antifraudfee) AS antifraudfee
+	,sum(dcr.sharedservicepercent * dcr.aquirerfee) AS aquirerfee
+	,sum(dcr.sharedservicepercent * dcr.anticipationcost) AS anticipationcost
+	,sum(dcr.sharedservicepercent * dcr.taxes) AS taxes
+	,sum(dcr.sharedservicepercent * dcr.extrafees) AS extrafees
+	,sum(dcr.sharedservicepercent * dcr.extrafeespu) AS extrafeespu
+	,sum(dcr.sharedservicepercent * dcr.noshow) AS noshow
+	,sum(dcr.sharedservicepercent * dcr.grosssalespucommission - dcr.sharedservicepercent * dcr.cancelledprebillingpu - dcr.sharedservicepercent * dcr.cancelledposbillingpu - dcr.sharedservicepercent * dcr.cancellationextrafeespu - dcr.sharedservicepercent * dcr.cancellationfinancecharge + dcr.sharedservicepercent * dcr.noshow + dcr.sharedservicepercent * dcr.extrafeespu + dcr.sharedservicepercent * dcr.financecharge + dcr.sharedservicepercent * dcr.adjustment) AS netrevenue
+	,sum(dcr.sharedservicepercent * dcr.commercialcancelledposbilling) AS commercialcancelledposbilling
+	,sum(dcr.sharedservicepercent * dcr.cancelledprebilling) AS cancelledprebilling
+	,sum(dcr.sharedservicepercent * dcr.cancelledprebillingpu) AS cancelledprebillingpu
+	,sum(dcr.sharedservicepercent * dcr.cancelledposbillingpu) AS cancelledposbillingpu
+	,sum(dcr.sharedservicepercent * dcr.cancellationextrafees) AS cancellationextrafees
+	,sum(dcr.sharedservicepercent * dcr.cancellationextrafeespu) AS cancellationextrafeespu
+	,sum(dcr.sharedservicepercent * dcr.cancellationfinancecharge) AS cancellationfinancecharge
+	,sum(dcr.sharedservicepercent * dcr.cancellationpromocodes) AS cancellationpromocodes
+	,sum(dcr.sharedservicepercent * dcr.administrativefee) AS administrativefee
+	,sum(dcr.sharedservicepercent * dcr.administrativefeecancelled) AS administrativefeecancelled
+	,sum(dcr.sharedservicepercent * dcr.newgrossrevenue) AS newgrossrevenue
+	,sum(dcr.sharedservicepercent * dcr.newgrossprofit) AS newgrossprofit
+	,getdate()
+from reports.com_finance_actual_history_changes dcr
+where 1 = 1
+	and dcr.eventdate between left(getdate() - 1, 7) + '-01' and cast(getdate() - 1 as date)
+group by 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29;
+
+analyze reports.com_acompanhamento_detail;
+
+grant all privileges on table reports.com_acompanhamento_detail to group bi_group;
+grant all privileges on table reports.com_acompanhamento_detail to group bi_group_r;
+
+-------------------------------------------------------------------------------
+-- End of code refactored
+-------------------------------------------------------------------------------
+
+-------------------------------------------------------------------------------
+-- LOAD com_acompanhamento_achievement - Historical goal achievement
+-------------------------------------------------------------------------------
+
+delete from reports.com_acompanhamento_achievement
+where 1 = 1 
+	and "month" = pgdate_part('month', getdate() - 1)
+	and "year" = pgdate_part('year', getdate() - 1);
+
+vacuum reports.com_acompanhamento_achievement;
+
+insert into reports.com_acompanhamento_achievement (
+	SELECT
+		 achievement.month
+		,achievement.year
+		,achievement.variable
+		,achievement.group
+		,achievement.manager
+		,achievement.region
+		,achievement.coordinator
+		,achievement.team
+		,achievement.grosssales
+		,achievement.grosssalespucommission
+		,achievement.cancelledprebillingpu
+		,achievement.cancelledprebilling
+		,achievement.commercialcancelledposbilling
+		,achievement.noshow
+		,achievement.adjustment
+		,achievement.netrevenuecity
+		,achievement.lastday
+		,achievement.today
+		,achievement.goalfilter
+		,achievement.cancelledposbillingpu
+		,achievement.grosssaleswithextrafees
+		,achievement.ammounttopartner
+		,achievement.promocodes
+		,achievement.financecharge
+		,achievement.antifraudfee
+		,achievement.aquirerfee
+		,achievement.anticipationcost
+		,achievement.taxes
+		,achievement.rolgoal
+		,achievement.grosssalesgoal
+		,achievement.grossprofitgoal
+		,achievement.commissiongoal
+		,achievement.rolgoalweight
+		,achievement.grosssalesgoalweight
+		,achievement.grossprofitgoalweight
+		,achievement.commissiongoalweight
+		,achievement.extrafees
+		,achievement.extrafeespu
+		,achievement.cancellationextrafees
+		,achievement.cancellationextrafeespu
+		,achievement.cancellationfinancecharge
+		,achievement.cancellationpromocodes
+		,achievement.administrativefee
+		,achievement.administrativefeecancelled
+		,achievement.executive_classification
+		,case when achievement.group = 'Executivo de Vendas' 
+			then achievement.team
+			else null
+		end filtro_executivo
+		,(coalesce(achievement.grosssales, 0) + coalesce(achievement.extrafees, 0) + coalesce(achievement.financecharge, 0)) GMV
+		,(coalesce(achievement.grosssalespucommission, 0) + coalesce(achievement.NoShow, 0) + coalesce(achievement.financecharge, 0) + 
+			coalesce(achievement.extrafeespu, 0) + coalesce(achievement.administrativefee, 0)) - 
+			(coalesce(achievement.CancelledPreBillingPU, 0) + coalesce(achievement.cancelledposbillingpu, 0) + 
+			coalesce(achievement.cancellationextrafeespu, 0) + coalesce(achievement.cancellationfinancecharge, 0) + 
+			coalesce(achievement.administrativefeecancelled, 0)) -
+			(coalesce(achievement.aquirerfee, 0) + coalesce(achievement.antifraudfee, 0) + coalesce(achievement.promocodes, 0) + 
+			coalesce(achievement.anticipationcost, 0) - coalesce(achievement.cancellationpromocodes, 0)) "grossprofit"
+		,(coalesce(achievement.grosssalespucommission, 0) + coalesce(achievement.administrativefee, 0) - 
+			coalesce(achievement.cancelledprebillingpu, 0) - coalesce(achievement.commercialcancelledposbilling, 0)) Receita_Comercial
+		,getdate() date_dw_laod
+	FROM (
+	SELECT 
+			g."month", 
+			g."year", 
+			g.rolgoal, 
+			g.grosssalesgoal, 
+			g.grossprofitgoal, 
+			g.commissiongoal, 
+			g.rolgoalweight, 
+			g.grosssalesgoalweight, 
+			g.grossprofitgoalweight, 
+			g.commissiongoalweight, 
+			g.variable, 
+	        CASE
+	            WHEN g."group" = 'Coordenador' THEN 'Gerente'
+	            WHEN g."group" = 'Gerente' THEN 'Diretor'
+	            ELSE g."group"
+	        END AS "group", 
+			COALESCE(t.manager, r.manager) AS manager, 
+			COALESCE(ot."region", r."region") AS "region", 
+			COALESCE(t.coordinator, r.coordinator) AS coordinator,
+			COALESCE(ot.team, r.team) AS team, 
+			COALESCE(r.grosssales, 0) AS grosssales, 
+			COALESCE(r.grosssalespucommission, 0) AS grosssalespucommission, 
+			COALESCE(r.cancelledprebillingpu, 0) AS cancelledprebillingpu, 
+			COALESCE(r.cancelledprebilling, 0) AS cancelledprebilling, 
+			COALESCE(r.commercialcancelledposbilling, 0) AS commercialcancelledposbilling, 
+			COALESCE(r.noshow, 0) AS noshow, 
+			COALESCE(r.adjustment, 0) AS adjustment, 
+			COALESCE(r.cancelledposbillingpu, 0) AS cancelledposbillingpu, 
+			COALESCE(r.grosssaleswithextrafees, 0) AS grosssaleswithextrafees, 
+			COALESCE(r.ammounttopartner, 0) AS ammounttopartner, 
+			COALESCE(r.promocodes, 0) AS promocodes, 
+			COALESCE(r.financecharge, 0) AS financecharge, 
+			COALESCE(r.antifraudfee, 0) AS antifraudfee,
+			COALESCE(r.aquirerfee, 0) AS aquirerfee, 
+			COALESCE(r.anticipationcost, 0::double precision) AS anticipationcost,
+			COALESCE(r.taxes, 0) AS taxes, 
+			COALESCE(r.extrafees, 0) AS extrafees, 
+			COALESCE(r.extrafeespu, 0) AS extrafeespu, 
+			COALESCE(r.cancellationextrafees, 0) AS cancellationextrafees, 
+			COALESCE(r.cancellationextrafeespu, 0) AS cancellationextrafeespu, 
+			COALESCE(r.cancellationfinancecharge, 0) AS cancellationfinancecharge, 
+			COALESCE(r.netrevenuelastday, 0) AS netrevenuelastday, 
+			COALESCE(r.netrevenuecity, 0) AS netrevenuecity, 
+			pgdate_part('day', last_day(cast(cast(g."year" as varchar) + '-' + cast(g."month" as varchar) + '-' + '01' as date))) AS lastday, 
+			pgdate_part('day', 
+				CASE
+					WHEN date_add('day', -1, 
+					( SELECT date_add('day', 1, "max"(com_acompanhamento_detail.eventdate)) AS date_add
+					   FROM reports.com_acompanhamento_detail)) > last_day(cast(cast(g."year" as varchar) + '-' + cast(g."month" as varchar) + '-' + '01' as date)) 
+					   THEN last_day(cast(cast(g."year" as varchar) + '-' + cast(g."month" as varchar) + '-' + '01' as date))
+					ELSE date_add('day', -1, 
+					( SELECT date_add('day', 1, "max"(com_acompanhamento_detail.eventdate)) AS date_add
+					   FROM reports.com_acompanhamento_detail))
+				END) AS today, 
+	        CASE
+	            WHEN g.grossprofitgoal < 70000 THEN 'Menor que 70.000'
+	            WHEN g.grossprofitgoal <= 125000 THEN 'Menor que 125.000'
+	            ELSE 'Maior que 125.00'
+	        END AS goalfilter, 
+			COALESCE(r.cancellationpromocodes, 0) AS cancellationpromocodes, 
+			COALESCE(r.administrativefee, 0) AS administrativefee, 
+			COALESCE(r.administrativefeecancelled, 0) AS administrativefeecancelled,
+			COALESCE(r.executive_classification, 'N/A') as executive_classification
+		FROM reports.goal_grossprofit g
+		LEFT JOIN reports.ownerteam ot ON g.variable = ot.ownererp 
+										AND g."group" = 'Executivo de Vendas'
+		LEFT JOIN reports.team t ON ot.team = t.team
+		LEFT JOIN 
+			(
+				(
+					(
+						(
+							(	
+							SELECT 
+								dcr.eventmonth, 
+								dcr.eventyear, 
+								'Cidade' AS "group", 
+								'Total Geral' AS manager, 
+								'N/A' AS "region", 
+								'N/A' AS coordinator, 
+								'N/A' AS team, 
+								'Total Geral' AS variable, 
+								sum(dcr.grosssales) AS grosssales, 
+								sum(dcr.grossrevenue) AS grosssalespucommission, 
+								sum(dcr.cancelledprebillingpu) AS cancelledprebillingpu, 
+								sum(dcr.cancelledprebilling) AS cancelledprebilling, 
+								sum(dcr.commercialcancelledposbilling) AS commercialcancelledposbilling, 
+								sum(dcr.noshow) AS noshow, 
+								0 AS adjustment, 
+								sum(dcr.cancelledposbillingpu) AS cancelledposbillingpu, 
+								sum(dcr.grosssaleswithextrafees) AS grosssaleswithextrafees, 
+								sum(dcr.ammounttopartner) AS ammounttopartner, 
+								sum(dcr.promocodes) AS promocodes, 
+								sum(dcr.financecharge) AS financecharge, 
+								sum(dcr.antifraudfee) AS antifraudfee, 
+								sum(dcr.aquirerfee) AS aquirerfee, 
+								sum(dcr.anticipationcost) AS anticipationcost, 
+								sum(dcr.taxes) AS taxes, 
+								sum(dcr.extrafees) AS extrafees, 
+								sum(dcr.extrafeespu) AS extrafeespu, 
+								sum(dcr.cancellationextrafees) AS cancellationextrafees, 
+								sum(dcr.cancellationextrafeespu) AS cancellationextrafeespu, 
+								sum(dcr.cancellationfinancecharge) AS cancellationfinancecharge, 
+								0 AS netrevenuelastday, 
+								0 AS netrevenuecity, 
+								0 AS netrevenuecitylastday, 
+								0 AS goalcity, 
+								sum(dcr.cancellationpromocodes) AS cancellationpromocodes, 
+								sum(dcr.administrativefee) AS administrativefee, 
+								sum(dcr.administrativefeecancelled) AS administrativefeecancelled,
+								'N/A' as executive_classification
+							FROM reports.com_acompanhamento_detail dcr
+							WHERE 1 = 1 
+								AND dcr.eventdate >= left(getdate() - 1, 7) + '-01'
+								AND dcr.eventdate <= cast(getdate() - 1 as date)
+							GROUP BY dcr.eventmonth, dcr.eventyear
+							UNION ALL 
+							SELECT 
+								dcr.eventmonth, 
+								dcr.eventyear, 
+								'Cidade' AS "group", 
+								listagg(distinct dcr.manager, ', ') manager, 
+								'N/A' AS "region", 
+								listagg(distinct dcr.coordinator, ', ') coordinator, 
+								'Qualidade' AS team, 
+								case when dcr.team like 'Sao Paulo%' or dcr.team like '%Turismo%'
+									then dcr.region
+									else dcr.team
+								end AS variable, 
+								sum(dcr.grosssales) AS grosssales, 
+								sum(dcr.grossrevenue) AS grosssalespucommission, 
+								sum(dcr.cancelledprebillingpu) AS cancelledprebillingpu, 
+								sum(dcr.cancelledprebilling) AS cancelledprebilling, 
+								sum(dcr.commercialcancelledposbilling) AS commercialcancelledposbilling, 
+								sum(dcr.noshow) AS noshow, 
+								0 AS adjustment, 
+								sum(dcr.cancelledposbillingpu) AS cancelledposbillingpu, 
+								sum(dcr.grosssaleswithextrafees) AS grosssaleswithextrafees, 
+								sum(dcr.ammounttopartner) AS ammounttopartner, 
+								sum(dcr.promocodes) AS promocodes, 
+								sum(dcr.financecharge) AS financecharge, 
+								sum(dcr.antifraudfee) AS antifraudfee, 
+								sum(dcr.aquirerfee) AS aquirerfee, 
+								sum(dcr.anticipationcost) AS anticipationcost, 
+								sum(dcr.taxes) AS taxes, 
+								sum(dcr.extrafees) AS extrafees, 
+								sum(dcr.extrafeespu) AS extrafeespu, 
+								sum(dcr.cancellationextrafees) AS cancellationextrafees, 
+								sum(dcr.cancellationextrafeespu) AS cancellationextrafeespu, 
+								sum(dcr.cancellationfinancecharge) AS cancellationfinancecharge, 
+								0 AS netrevenuelastday, 
+								0 AS netrevenuecity, 
+								0 AS netrevenuecitylastday, 
+								0 AS goalcity, 
+								sum(dcr.cancellationpromocodes) AS cancellationpromocodes, 
+								sum(dcr.administrativefee) AS administrativefee, 
+								sum(dcr.administrativefeecancelled) AS administrativefeecancelled,
+								'N/A' as executive_classification
+							FROM reports.com_acompanhamento_detail dcr
+							WHERE 1 = 1 
+								AND dcr.eventdate >= left(getdate() - 1, 7) + '-01'
+								AND dcr.eventdate <= cast(getdate() - 1 as date)
+							GROUP BY dcr.eventmonth, dcr.eventyear, 
+									case when dcr.team like 'Sao Paulo%' or dcr.team like '%Turismo%'
+										then dcr.region
+										else dcr.team
+									end
+							)
+						UNION ALL 
+						SELECT 
+							dcr.eventmonth, 
+							dcr.eventyear, 
+							'Região' AS "group", 
+							'N/A' AS manager, 
+							'N/A' AS "region", 
+							'N/A' AS coordinator, 
+							'N/A' AS team, 
+							dcr."region" AS variable, 
+							sum(dcr.grosssales) AS grosssales, 
+							sum(dcr.grossrevenue) AS grosssalespucommission, 
+							sum(dcr.cancelledprebillingpu) AS cancelledprebillingpu, 
+							sum(dcr.cancelledprebilling) AS cancelledprebilling, 
+							sum(dcr.commercialcancelledposbilling) AS commercialcancelledposbilling, 
+							sum(dcr.noshow) AS noshow, 
+							0 AS adjustment, 
+							sum(dcr.cancelledposbillingpu) AS cancelledposbillingpu, 
+							sum(dcr.grosssaleswithextrafees) AS grosssaleswithextrafees, 
+							sum(dcr.ammounttopartner) AS ammounttopartner, 
+							sum(dcr.promocodes) AS promocodes, 
+							sum(dcr.financecharge) AS financecharge, 
+							sum(dcr.antifraudfee) AS antifraudfee, 
+							sum(dcr.aquirerfee) AS aquirerfee, 
+							sum(dcr.anticipationcost) AS anticipationcost, 
+							sum(dcr.taxes) AS taxes, 
+							sum(dcr.extrafees) AS extrafees, 
+							sum(dcr.extrafeespu) AS extrafeespu, 
+							sum(dcr.cancellationextrafees) AS cancellationextrafees, 
+							sum(dcr.cancellationextrafeespu) AS cancellationextrafeespu, 
+							sum(dcr.cancellationfinancecharge) AS cancellationfinancecharge, 
+							0 AS netrevenuelastday, 
+							0 AS netrevenuecity, 
+							0 AS netrevenuecitylastday, 
+							0 AS goalcity, 
+							sum(dcr.cancellationpromocodes) AS cancellationpromocodes, 
+							sum(dcr.administrativefee) AS administrativefee, 
+							sum(dcr.administrativefeecancelled) AS administrativefeecancelled,
+							'N/A' as executive_classification
+						FROM reports.com_acompanhamento_detail dcr
+						WHERE 1 = 1 
+							AND dcr.eventdate >= left(getdate() - 1, 7) + '-01'
+							AND dcr.eventdate <= cast(getdate() - 1 as date)
+						GROUP BY dcr.eventmonth, dcr.eventyear, dcr."region"
+						)
+					UNION ALL 
+					SELECT 
+						dcr.eventmonth, 
+						dcr.eventyear, 
+						'Gerente' AS "group", 
+						'N/A' AS manager, 
+						'N/A' AS "region", 
+						'N/A' AS coordinator, 
+						'N/A' AS team, 
+						dcr.manager AS variable, 
+						sum(dcr.grosssales) AS grosssales, 
+						sum(dcr.grossrevenue) AS grosssalespucommission, 
+						sum(dcr.cancelledprebillingpu) AS cancelledprebillingpu, 
+						sum(dcr.cancelledprebilling) AS cancelledprebilling, 
+						sum(dcr.commercialcancelledposbilling) AS commercialcancelledposbilling, 
+						sum(dcr.noshow) AS noshow, 
+						0 AS adjustment, 
+						sum(dcr.cancelledposbillingpu) AS cancelledposbillingpu, 
+						sum(dcr.grosssaleswithextrafees) AS grosssaleswithextrafees, 
+						sum(dcr.ammounttopartner) AS ammounttopartner, 
+						sum(dcr.promocodes) AS promocodes, 
+						sum(dcr.financecharge) AS financecharge, 
+						sum(dcr.antifraudfee) AS antifraudfee, 
+						sum(dcr.aquirerfee) AS aquirerfee, 
+						sum(dcr.anticipationcost) AS anticipationcost, 
+						sum(dcr.taxes) AS taxes, 
+						sum(dcr.extrafees) AS extrafees, 
+						sum(dcr.extrafeespu) AS extrafeespu, 
+						sum(dcr.cancellationextrafees) AS cancellationextrafees, 
+						sum(dcr.cancellationextrafeespu) AS cancellationextrafeespu, 
+						sum(dcr.cancellationfinancecharge) AS cancellationfinancecharge, 
+						0 AS netrevenuelastday, 
+						0 AS netrevenuecity, 
+						0 AS netrevenuecitylastday, 
+						0 AS goalcity, 
+						sum(dcr.cancellationpromocodes) AS cancellationpromocodes, 
+						sum(dcr.administrativefee) AS administrativefee, 
+						sum(dcr.administrativefeecancelled) AS administrativefeecancelled,
+						'N/A' as executive_classification
+					FROM reports.com_acompanhamento_detail dcr
+					WHERE 1 = 1 
+						AND dcr.eventdate >= left(getdate() - 1, 7) + '-01'
+						AND dcr.eventdate <= cast(getdate() - 1 as date)
+					GROUP BY dcr.eventmonth, dcr.eventyear, dcr.manager
+					)			
+				UNION ALL 	
+				SELECT 
+					dcr.eventmonth, 
+					dcr.eventyear, 
+					'Coordenador' AS "group", 
+					dcr.manager, 
+					'N/A' AS "region", 
+					dcr.coordinator, 
+					listagg(distinct dcr.team, ', ') AS team, 
+					dcr.coordinator AS variable, 
+					sum(dcr.grosssales) AS grosssales, 
+					sum(dcr.grossrevenue) AS grosssalespucommission, 
+					sum(dcr.cancelledprebillingpu) AS cancelledprebillingpu, 
+					sum(dcr.cancelledprebilling) AS cancelledprebilling,
+					sum(dcr.commercialcancelledposbilling) AS commercialcancelledposbilling, 
+					sum(dcr.noshow) AS noshow,
+					0 AS adjustment,
+					sum(dcr.cancelledposbillingpu) AS cancelledposbillingpu,
+					sum(dcr.grosssaleswithextrafees) AS grosssaleswithextrafees, 
+					sum(dcr.ammounttopartner) AS ammounttopartner, 
+					sum(dcr.promocodes) AS promocodes, 
+					sum(dcr.financecharge) AS financecharge, 
+					sum(dcr.antifraudfee) AS antifraudfee,
+					sum(dcr.aquirerfee) AS aquirerfee, 
+					sum(dcr.anticipationcost) AS anticipationcost,
+					sum(dcr.taxes) AS taxes,
+					sum(dcr.extrafees) AS extrafees, 
+					sum(dcr.extrafeespu) AS extrafeespu, 
+					sum(dcr.cancellationextrafees) AS cancellationextrafees, 
+					sum(dcr.cancellationextrafeespu) AS cancellationextrafeespu,
+					sum(dcr.cancellationfinancecharge) AS cancellationfinancecharge, 
+					0 AS netrevenuelastday, 
+					0 AS netrevenuecity,
+					0 AS netrevenuecitylastday, 
+					0 AS goalcity, 
+					sum(dcr.cancellationpromocodes) AS cancellationpromocodes, 
+					sum(dcr.administrativefee) AS administrativefee, 
+					sum(dcr.administrativefeecancelled) AS administrativefeecancelled,
+					'N/A' as executive_classification
+				FROM reports.com_acompanhamento_detail dcr
+				WHERE 1 = 1 
+					AND dcr.eventdate >= left(getdate() - 1, 7) + '-01'
+					AND dcr.eventdate <= cast(getdate() - 1 as date)
+				GROUP BY dcr.eventmonth, dcr.eventyear, dcr.manager, dcr.coordinator
+				)		
+			UNION ALL 	
+			SELECT 
+				a.eventmonth, 
+				a.eventyear, 
+				a."group", 
+				a.manager, 
+				a."region",
+				a.coordinator, 
+				a.team, 
+				a.variable, 
+				a.grosssales,
+				a.grosssalespucommission, 
+				a.cancelledprebillingpu,
+				a.cancelledprebilling, 
+				a.commercialcancelledposbilling, 
+				a.noshow, 
+				a.adjustment, 
+				a.cancelledposbillingpu, 
+				a.grosssaleswithextrafees, 
+				a.ammounttopartner, 
+				a.promocodes, 
+				a.financecharge, 
+				a.antifraudfee,
+				a.aquirerfee,
+				a.anticipationcost, 
+				a.taxes, 
+				a.extrafees,
+				a.extrafeespu,
+				a.cancellationextrafees,
+				a.cancellationextrafeespu,
+				a.cancellationfinancecharge,
+				a.netrevenuelastday,
+				b.netrevenuecity,
+				b.netrevenuecitylastday, 
+				g.grosssalesgoal AS goalcity, 
+				a.cancellationpromocodes, 
+				a.administrativefee, 
+				a.administrativefeecancelled,
+				a.executive_classification
+			FROM 
+				(	
+				SELECT 
+					dcr.eventmonth, 
+					dcr.eventyear, 
+					'Executivo de Vendas' AS "group", 
+					dcr.manager, 
+					dcr."region", 
+					dcr.coordinator, 
+					dcr.team, 
+					dcr.ownererp AS variable, 
+					sum(dcr.grosssales) AS grosssales, 
+					sum(dcr.grossrevenue) AS grosssalespucommission, 
+					sum(dcr.cancelledprebillingpu) AS cancelledprebillingpu,
+					sum(dcr.cancelledprebilling) AS cancelledprebilling, 
+					sum(dcr.commercialcancelledposbilling) AS commercialcancelledposbilling, 
+					sum(dcr.noshow) AS noshow, 
+					0 AS adjustment, 
+					sum(dcr.cancelledposbillingpu) AS cancelledposbillingpu, 
+					sum(dcr.grosssaleswithextrafees) AS grosssaleswithextrafees, 
+					sum(dcr.ammounttopartner) AS ammounttopartner, 
+					sum(dcr.promocodes) AS promocodes, 
+					sum(dcr.financecharge) AS financecharge, 
+					sum(dcr.antifraudfee) AS antifraudfee, 
+					sum(dcr.aquirerfee) AS aquirerfee, 
+					sum(dcr.anticipationcost) AS anticipationcost, 
+					sum(dcr.taxes) AS taxes, 
+					sum(dcr.extrafees) AS extrafees,
+					sum(dcr.extrafeespu) AS extrafeespu, 
+					sum(dcr.cancellationextrafees) AS cancellationextrafees,
+					sum(dcr.cancellationextrafeespu) AS cancellationextrafeespu,
+					sum(dcr.cancellationfinancecharge) AS cancellationfinancecharge,
+					sum(
+						CASE
+							WHEN dcr.eventdate = date_add('day', -1, ( SELECT date_add('day', 1, "max"(com_acompanhamento_detail.eventdate)) AS getdata
+							   FROM reports.com_acompanhamento_detail)) THEN dcr.grossrevenue - dcr.cancelledprebillingpu - dcr.commercialcancelledposbilling + dcr.noshow-- + dcr.adjustment
+							ELSE 0
+						END) AS netrevenuelastday, 
+					sum(dcr.cancellationpromocodes) AS cancellationpromocodes, 
+					sum(dcr.administrativefee) AS administrativefee, 
+					sum(dcr.administrativefeecancelled) AS administrativefeecancelled,
+					dcr.executive_classification as executive_classification
+				FROM reports.com_acompanhamento_detail dcr
+				WHERE 1 = 1 
+					AND dcr.eventdate >= left(getdate() - 1, 7) + '-01'
+					AND dcr.eventdate <= cast(getdate() - 1 as date)
+				GROUP BY dcr.eventmonth, dcr.eventyear, dcr.manager, dcr."region", dcr.coordinator, dcr.team, dcr.ownererp, dcr.executive_classification
+				) a
+				LEFT JOIN 
+						( 
+						SELECT 
+							dcr.eventmonth, 
+							dcr.eventyear, 
+							dcr.team, 
+							sum(dcr.grossrevenue) - 
+								sum(dcr.cancelledprebillingpu) - 
+								sum(dcr.commercialcancelledposbilling) + 
+								sum(dcr.noshow) + 
+								0 AS netrevenuecity, 
+							sum(
+								CASE
+									WHEN dcr.eventdate = date_add('day', -1, ( SELECT date_add('day', 1, "max"(com_acompanhamento_detail.eventdate)) AS getdata
+									   FROM reports.com_acompanhamento_detail)) THEN (dcr.grossrevenue - dcr.cancelledprebillingpu - dcr.commercialcancelledposbilling + dcr.noshow)-- + dcr.adjustment
+									ELSE 0
+								END) AS netrevenuecitylastday
+						FROM reports.com_acompanhamento_detail dcr
+						WHERE 1 = 1 
+							AND dcr.eventdate >= left(getdate() - 1, 7) + '-01'
+							AND dcr.eventdate <= cast(getdate() - 1 as date)
+						GROUP BY dcr.eventmonth, dcr.eventyear, dcr.team
+						) b ON b.eventmonth = a.eventmonth AND b.eventyear = a.eventyear AND b.team = a.team 
+				LEFT JOIN reports.goal_grossprofit g 
+					ON g.variable = a.team 
+						AND g."month"::double precision = a.eventmonth 
+						AND g."year"::double precision = a.eventyear 
+						AND g."group" = 'Cidade'
+			) r ON g."month"::double precision = r.eventmonth 
+					AND g."year"::double precision = r.eventyear 
+					AND upper(g.variable) = upper(r.variable) 
+					AND g."group" = r."group"
+		WHERE 1 = 1 
+			and "month" = pgdate_part('month', getdate() - 1)
+			and "year" = pgdate_part('year', getdate() - 1)
+	) achievement
+);
+
+analyze reports.com_acompanhamento_achievement;
+
+-------------------------------------------------------------------------------
+-- LOAD DailyCommercialRevenueGrossProfit
+-------------------------------------------------------------------------------
+delete from reports.DailyCommercialRevenueGrossProfit;
+insert into reports.DailyCommercialRevenueGrossProfit 
+select
+	eventdate,
+	eventyear,
+	eventmonth,
+	eventday,
+	owner,
+	ownererp,
+	coordinator,
+	manager,
+	region,
+	team,
+	contractid,
+	unifieddiscountid,
+	discountname,
+	idoferta,
+	purchaseoption,
+	accountid,
+	accountname,
+	categoryname,
+	iscalculatedbycontract,
+	hassharedservice,
+	discountedvalue,
+	qtycoupons,
+	ourcommission,
+	grosssales,
+	grosssaleswithextrafeespu,
+	grosssalespucommission,
+	commercialcancelledposbilling,
+	cancelledprebilling,
+	cancelledprebillingpu,
+	noshow,
+	cancelledposbillingpu,
+	ammounttopartner,
+	promocodes,
+	financecharge,
+	antifraudfee,
+	aquirerfee,
+	anticipationcost,
+	taxes,
+	extrafees,
+	extrafeespu,
+	sharedservicepercent,
+	cancellationfinancecharge,
+	cancellationextrafees,
+	cancellationextrafeespu,
+	adjustment,
+	dealsclub,
+	paymentcondition,
+	paymentconditionname,
+	subdivision,
+	type_site,
+	category_site,
+	subcategory_site,
+	usenow,
+	dealcity,
+	cancellationpromocodes,
+	administrativefee,
+	administrativefeecancelled
+from reports.com_finance_actual_history_changes dcr
+where 1 = 1
+	and dcr.eventdate between left(getdate() - 1, 7) + '-01' and cast(getdate() - 1 as date)
+;
+
+-------------------------------------------------------------------------------
+-- COMERCIAL ACHIEVIMENT (REPORTS JASPER)
+-------------------------------------------------------------------------------
+select
+      g."Month"
+,     g."Year"
+,	  g.rolgoal
+,	  g.grosssalesgoal
+,	  g.grossprofitgoal
+,	  g.commissiongoal
+,	  g.rolgoalweight
+, 	  g.grosssalesgoalweight
+,	  g.grossprofitgoalweight
+,	  g.commissiongoalweight
+,     g.variable
+,     g."Group"
+,     coalesce(t.Manager,r.Manager) Manager
+,     coalesce(ot.Region,r.Region) Region
+,     coalesce(t.Coordinator,r.Coordinator) Coordinator
+,     coalesce(ot.Team,r.Team) Team
+,     coalesce(r.GrossSales,0) GrossSales
+,     coalesce(r.GrossSalesPUCommission,0) GrossSalesPUCommission
+,     coalesce(r.CancelledPreBillingPU,0) CancelledPreBillingPU
+,     coalesce(r.CancelledPosBillingPU,0) CancelledPosBillingPU
+,	  coalesce(r.CommercialCancelledPosBilling,0) CommercialCancelledPosBilling
+,	  coalesce(r.cancelledprebilling,0) cancelledprebilling
+,	  coalesce(r.ammounttopartner,0) ammounttopartner
+,	  coalesce(r.promocodes,0) promocodes
+,	  coalesce(r.aquirerfee,0) aquirerfee
+,	  coalesce(r.anticipationcost,0) anticipationcost
+,	  coalesce(r.taxes,0) taxes
+,	  coalesce(r.extrafees,0) extrafees
+,	  coalesce(r.cancellationfinancecharge,0) cancellationfinancecharge
+,	  coalesce(r.cancellationextrafeespu,0) cancellationextrafeespu
+,	  coalesce(r.cancellationextrafees,0) cancellationextrafees
+, 	  coalesce(r.antifraudfee, 0) antifraudfee
+,     coalesce(r.extrafeespu,0) extrafeespu
+,     coalesce(r.financecharge,0) financecharge
+,     coalesce(r.NoShow,0) NoShow
+,     coalesce(r.Adjustment,0) Adjustment
+,     coalesce(r.NetRevenueLastDay,0) NetRevenueLastDay
+,     coalesce(r.NetRevenueCity,0) NetRevenueCity
+,     date_part(day,dateadd(day,-1,dateadd(month,+1,cast(cast(g."Year" as varchar(4))+'/'+cast(g."Month" as varchar(2))+'/'+'01' as date)))) LastDay
+,     date_part(day,(select case when datepart(day,getdate()) = 1 then dateadd(day,-1,dateadd(month,1,dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date))))	else cast(dateadd(day, -1,getdate()) as date) end )) Today
+,     coalesce(r.NetRevenueCityLastDay,0) NetRevenueCityLastDay
+,     case
+		when g.grossprofitgoal < 80000 then 'Menor que 80.000'
+		when g.grossprofitgoal < 150000 then 'Menor que 150.000'
+		else 'Maior que 150.00' end GoalFilter
+,     coalesce(r.GoalCity,0) GoalCity
+,	  rit.Per
+,	x.ForecastGrossSalesPUCommission7
+,	x.ForecastGrossSalesPUCommission15
+,	x.ForecastGrossSalesPUCommission22
+,	x.ForecastGrossSalesPUCommission30
+,	rit.PerNext7
+,   coalesce(r.cancellationpromocodes,0) cancellationpromocodes
+,   coalesce(r.administrativefee,0) administrativefee
+,   coalesce(r.administrativefeecancelled,0) administrativefeecancelled
+--,	r.sourceid --inclusão para identificar sites PU/Groupon
+into #CommercialAchievementGrossProfit
+from reports.goal_grossprofit g
+--
+left join
+	(
+	select
+		date_part(month,(select case when datepart(day,getdate()) = 1 then dateadd(day,-1,dateadd(month,1,dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date))))	else cast(dateadd(day, -1,getdate()) as date) end )) "Month"
+	,	date_part(year,(select case when datepart(day,getdate()) = 1 then dateadd(day,-1,dateadd(month,1,dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date))))	else cast(dateadd(day, -1,getdate()) as date) end )) "Year"
+	,	sum(case
+				when "Date" between (select case when datepart(day,getdate()) = 1 then dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date)) else cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date) end ) and (select case when datepart(day,getdate()) = 1 then dateadd(day,-1,dateadd(month,1,dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date))))	else cast(dateadd(day, -1,getdate()) as date) end )
+				then Weight
+			end) Per
+	,	sum(case
+				when "Date" between dateadd(day,1,(select case when datepart(day,getdate()) = 1 then dateadd(day,-1,dateadd(month,1,dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date))))	else cast(dateadd(day, -1,getdate()) as date) end ))
+					and dateadd(day,7,(select case when datepart(day,getdate()) = 1 then dateadd(day,-1,dateadd(month,1,dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date))))	else cast(dateadd(day, -1,getdate()) as date) end ))
+				then Weight
+			end) PerNext7
+	from reports.SeasonalGoal
+	) rit
+	on g."Month" = rit."Month"
+	and g."Year" = rit."Year"
+--
+left join reports.OwnerTeam ot
+	on upper(g.Variable) = upper(ot.OwnerERP)
+	and g."group" = 'Executivo de Vendas'
+--
+left join reports.Team t on ot.Team = t.Team
+--
+left join
+	(
+	select
+		  EventMonth
+	,     EventYear
+	,     'Cidade' "Group"
+	,     'Total Geral' Manager
+	,     'N/A' Region
+	,     'N/A' Coordinator
+	,     'N/A' Team
+	,     'Total Geral' Variable
+	,     sum(sharedservicepercent * GrossSales) GrossSales
+	,     sum(sharedservicepercent * GrossSalesPUCommission) GrossSalesPUCommission
+	,     sum(sharedservicepercent * CancelledPreBillingPU) CancelledPreBillingPU
+	,     sum(sharedservicepercent * CancelledPosBillingPU) CancelledPosBillingPU
+	,	  sum(sharedservicepercent * CommercialCancelledPosBilling) CommercialCancelledPosBilling
+	,	  sum(sharedservicepercent * cancelledprebilling) cancelledprebilling
+	,     sum(sharedservicepercent * ammounttopartner) ammounttopartner
+	,	  sum(sharedservicepercent * promocodes) promocodes
+	,     sum(sharedservicepercent * aquirerfee) aquirerfee
+	,	  sum(sharedservicepercent * anticipationcost) anticipationcost
+	,	  sum(sharedservicepercent * taxes) taxes
+	,	  sum(sharedservicepercent * extrafees) extrafees
+	,     sum(sharedservicepercent * cancellationfinancecharge) cancellationfinancecharge
+	,     sum(sharedservicepercent * cancellationextrafeespu) cancellationextrafeespu
+	,     sum(sharedservicepercent * cancellationextrafees) cancellationextrafees
+	,	  sum(sharedservicepercent * antifraudfee) antifraudfee
+	,     sum(sharedservicepercent * extrafeespu) extrafeespu
+	,	  sum(sharedservicepercent * financecharge) financecharge
+	,     sum(sharedservicepercent * NoShow) NoShow
+	,     sum(sharedservicepercent * Adjustment) Adjustment
+	,     cast(0 as decimal(15,2)) NetRevenueLastDay
+	,     cast(0 as decimal(15,2)) NetRevenueCity
+	,     cast(0 as decimal(15,2)) NetRevenueCityLastDay
+	,     cast(0 as decimal(15,2)) GoalCity
+	,     sum(sharedservicepercent * cancellationpromocodes) cancellationpromocodes
+	,	  sum(sharedservicepercent * administrativefee) "administrativefee"
+	,	  sum(sharedservicepercent * administrativefeecancelled) "administrativefeecancelled"	
+--	,	  sourceid sourceid --inclusão para identificar sites PU/Groupon
+	from reports.DailyCommercialRevenueGrossProfit
+	where EventDate between 
+		(select case when datepart(day,getdate()) = 1 
+					then dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date)) 
+					else cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date) 
+				end ) 
+		and 
+		(select case when datepart(day,getdate()) = 1 
+					then dateadd(day,-1,dateadd(month,1,dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date))))
+					else cast(dateadd(day, -1,getdate()) as date) 
+				end )
+	group by
+		  EventMonth
+	,     EventYear
+--	,	  sourceid --inclusão para identificar sites PU/Groupon
+--
+union all
+--
+	select
+		  EventMonth
+	,     EventYear
+	,     'Cidade' "Group"
+	,     Manager
+	,     'N/A' Region
+	,     Coordinator
+	,     'Qualidade' Team
+	,     Team Variable
+	,     sum(sharedservicepercent * GrossSales) GrossSales
+	,     sum(sharedservicepercent * GrossSalesPUCommission) GrossSalesPUCommission
+	,     sum(sharedservicepercent * CancelledPreBillingPU) CancelledPreBillingPU
+	,     sum(sharedservicepercent * CancelledPosBillingPU) CancelledPosBillingPU
+	,	  sum(sharedservicepercent * CommercialCancelledPosBilling) CommercialCancelledPosBilling
+	,	  sum(sharedservicepercent * cancelledprebilling) cancelledprebilling
+	,     sum(sharedservicepercent * ammounttopartner) ammounttopartner
+	,	  sum(sharedservicepercent * promocodes) promocodes
+	,     sum(sharedservicepercent * aquirerfee) aquirerfee
+	,	  sum(sharedservicepercent * anticipationcost) anticipationcost
+	,	  sum(sharedservicepercent * taxes) taxes
+	,	  sum(sharedservicepercent * extrafees) extrafees
+	,     sum(sharedservicepercent * cancellationfinancecharge) cancellationfinancecharge
+	,     sum(sharedservicepercent * cancellationextrafeespu) cancellationextrafeespu
+	,     sum(sharedservicepercent * cancellationextrafees) cancellationextrafees
+	,	  sum(sharedservicepercent * antifraudfee) antifraudfee
+	,     sum(sharedservicepercent * extrafeespu) extrafeespu
+	,	  sum(sharedservicepercent * financecharge) financecharge
+	,     sum(sharedservicepercent * NoShow) NoShow
+	,     sum(sharedservicepercent * Adjustment) Adjustment
+	,     cast(0 as decimal(15,2)) NetRevenueLastDay
+	,     cast(0 as decimal(15,2)) NetRevenueCity
+	,     cast(0 as decimal(15,2)) NetRevenueCityLastDay
+	,     cast(0 as decimal(15,2)) GoalCity
+	,     sum(sharedservicepercent * cancellationpromocodes) cancellationpromocodes
+	,	  sum(sharedservicepercent * administrativefee) "administrativefee"
+	,	  sum(sharedservicepercent * administrativefeecancelled) "administrativefeecancelled"
+	--,	  sourceid sourceid --inclusão para identificar sites PU/Groupon
+	from reports.DailyCommercialRevenueGrossProfit
+	where EventDate between 
+		(select case when datepart(day,getdate()) = 1 
+					then dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date)) 
+					else cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date) 
+				end ) 
+		and 
+		(select case when datepart(day,getdate()) = 1 
+					then dateadd(day,-1,dateadd(month,1,dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date))))
+					else cast(dateadd(day, -1,getdate()) as date)
+				end )
+	group by
+		  EventMonth
+	,     EventYear
+	,     Manager
+	,	  Coordinator
+	,     Team
+	--,	  sourceid --inclusão para identificar sites PU/Groupon
+--
+union all
+--
+	select
+		  EventMonth
+	,     EventYear
+	,     'Região' "Group"
+	,     'N/A' Manager
+	,     'N/A' Region
+	,     'N/A' Coordinator
+	,     'N/A' Team
+	,     Region Variable
+	,     sum(sharedservicepercent * GrossSales) GrossSales
+	,     sum(sharedservicepercent * GrossSalesPUCommission) GrossSalesPUCommission
+	,     sum(sharedservicepercent * CancelledPreBillingPU) CancelledPreBillingPU
+	,     sum(sharedservicepercent * CancelledPosBillingPU) CancelledPosBillingPU
+	,	  sum(sharedservicepercent * CommercialCancelledPosBilling) CommercialCancelledPosBilling
+	,	  sum(sharedservicepercent * cancelledprebilling) cancelledprebilling
+	,     sum(sharedservicepercent * ammounttopartner) ammounttopartner
+	,	  sum(sharedservicepercent * promocodes) promocodes
+	,     sum(sharedservicepercent * aquirerfee) aquirerfee
+	,	  sum(sharedservicepercent * anticipationcost) anticipationcost
+	,	  sum(sharedservicepercent * taxes) taxes
+	,	  sum(sharedservicepercent * extrafees) extrafees
+	,     sum(sharedservicepercent * cancellationfinancecharge) cancellationfinancecharge
+	,     sum(sharedservicepercent * cancellationextrafeespu) cancellationextrafeespu
+	,     sum(sharedservicepercent * cancellationextrafees) cancellationextrafees
+	,	  sum(sharedservicepercent * antifraudfee) antifraudfee
+	,     sum(sharedservicepercent * extrafeespu) extrafeespu
+	,	  sum(sharedservicepercent * financecharge) financecharge
+	,     sum(sharedservicepercent * NoShow) NoShow
+	,     sum(sharedservicepercent * Adjustment) Adjustment
+	,     cast(0 as decimal(15,2)) NetRevenueLastDay
+	,     cast(0 as decimal(15,2)) NetRevenueCity
+	,     cast(0 as decimal(15,2)) NetRevenueCityLastDay
+	,     cast(0 as decimal(15,2)) GoalCity
+	,     sum(sharedservicepercent * cancellationpromocodes) cancellationpromocodes
+	,	  sum(sharedservicepercent * administrativefee) "administrativefee"
+	,	  sum(sharedservicepercent * administrativefeecancelled) "administrativefeecancelled"
+	--,	  sourceid --inclusão para identificar sites PU/Groupon
+	from reports.DailyCommercialRevenueGrossProfit
+	where EventDate between 
+		(select case when datepart(day,getdate()) = 1 
+					then dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date)) 
+					else cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date) 
+				end )
+		and 
+		(select case when datepart(day,getdate()) = 1 
+					then dateadd(day,-1,dateadd(month,1,dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date))))
+					else cast(dateadd(day, -1,getdate()) as date) 
+				end )
+	group by
+		  EventMonth
+	,     EventYear
+	,     Region
+	--,	  sourceid --inclusão para identificar sites PU/Groupon
+--
+union all
+--
+	select
+		  EventMonth
+	,     EventYear
+	,     'Gerente' "Group"
+	,     'N/A' Manager
+	,     'N/A' Region
+	,     'N/A' Coordinator
+	,     'N/A' Team
+	,     Manager Variable
+	,     sum(sharedservicepercent * GrossSales) GrossSales
+	,     sum(sharedservicepercent * GrossSalesPUCommission) GrossSalesPUCommission
+	,     sum(sharedservicepercent * CancelledPreBillingPU) CancelledPreBillingPU
+	,     sum(sharedservicepercent * CancelledPosBillingPU) CancelledPosBillingPU
+	,	  sum(sharedservicepercent * CommercialCancelledPosBilling) CommercialCancelledPosBilling
+	,	  sum(sharedservicepercent * cancelledprebilling) cancelledprebilling
+	,     sum(sharedservicepercent * ammounttopartner) ammounttopartner
+	,	  sum(sharedservicepercent * promocodes) promocodes
+	,     sum(sharedservicepercent * aquirerfee) aquirerfee
+	,	  sum(sharedservicepercent * anticipationcost) anticipationcost
+	,	  sum(sharedservicepercent * taxes) taxes
+	,	  sum(sharedservicepercent * extrafees) extrafees
+	,     sum(sharedservicepercent * cancellationfinancecharge) cancellationfinancecharge
+	,     sum(sharedservicepercent * cancellationextrafeespu) cancellationextrafeespu
+	,     sum(sharedservicepercent * cancellationextrafees) cancellationextrafees
+	,	  sum(sharedservicepercent * antifraudfee) antifraudfee
+	,     sum(sharedservicepercent * extrafeespu) extrafeespu
+	,	  sum(sharedservicepercent * financecharge) financecharge
+	,     sum(sharedservicepercent * NoShow) NoShow
+	,     sum(sharedservicepercent * Adjustment) Adjustment
+	,     cast(0 as decimal(15,2)) NetRevenueLastDay
+	,     cast(0 as decimal(15,2)) NetRevenueCity
+	,     cast(0 as decimal(15,2)) NetRevenueCityLastDay
+	,     cast(0 as decimal(15,2)) GoalCity
+	,     sum(sharedservicepercent * cancellationpromocodes) cancellationpromocodes
+	,	  sum(sharedservicepercent * administrativefee) "administrativefee"
+	,	  sum(sharedservicepercent * administrativefeecancelled) "administrativefeecancelled"
+	--,	  sourceid --inclusão para identificar sites PU/Groupon
+	from reports.DailyCommercialRevenueGrossProfit
+	where EventDate between 
+		(select case when datepart(day,getdate()) = 1 
+					then dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date)) 
+					else cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date) 
+				end )
+		and 
+		(select case when datepart(day,getdate()) = 1 
+					then dateadd(day,-1,dateadd(month,1,dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date))))
+					else cast(dateadd(day, -1,getdate()) as date) 
+				end )
+	group by
+		  EventMonth
+	,     EventYear
+	,     Manager
+	--,	  sourceid --inclusão para identificar sites PU/Groupon
+--
+union all
+--
+	select
+		EventMonth
+		,EventYear
+		,"Group"
+		,Manager
+		,Region
+		,Coordinator
+		,listagg(team, ', ') "Team"
+		,Variable
+		,sum(GrossSales) GrossSales
+		,sum(GrossSalesPUCommission) GrossSalesPUCommission
+		,sum(CancelledPreBillingPU) CancelledPreBillingPU
+		,sum(CancelledPosBillingPU) CancelledPosBillingPU
+		,sum(CommercialCancelledPosBilling) CommercialCancelledPosBilling
+		,sum(cancelledprebilling) cancelledprebilling
+		,sum(ammounttopartner) ammounttopartner
+		,sum(promocodes) promocodes
+		,sum(aquirerfee) aquirerfee
+		,sum(anticipationcost) anticipationcost
+		,sum(taxes) taxes
+		,sum(extrafees) extrafees
+		,sum(cancellationfinancecharge) cancellationfinancecharge
+		,sum(cancellationextrafeespu) cancellationextrafeespu
+		,sum(cancellationextrafees) cancellationextrafees
+		,sum(antifraudfee) antifraudfee
+		,sum(extrafeespu) extrafeespu
+		,sum(financecharge) financecharge
+		,sum(NoShow) NoShow
+		,sum(Adjustment) Adjustment
+		,sum(NetRevenueLastDay) NetRevenueLastDay
+		,sum(NetRevenueCity) NetRevenueCity
+		,sum(NetRevenueCityLastDay) NetRevenueCityLastDay
+		,sum(GoalCity) GoalCity
+		,sum(cancellationpromocodes) cancellationpromocodes
+		,sum(administrativefee) administrativefee
+		,sum(administrativefeecancelled) administrativefeecancelled
+		--,sourceid --inclusão para identificar sites PU/Groupon
+	from (
+			select
+				 EventMonth
+			,    EventYear
+			,    'Coordenador' "Group"
+			,    Manager
+			,    'N/A' Region
+			,    Coordinator
+			,	  team
+			,     Coordinator Variable
+			,     sum(sharedservicepercent * GrossSales) GrossSales
+			,     sum(sharedservicepercent * GrossSalesPUCommission) GrossSalesPUCommission
+			,     sum(sharedservicepercent * CancelledPreBillingPU) CancelledPreBillingPU
+			,     sum(sharedservicepercent * CancelledPosBillingPU) CancelledPosBillingPU
+			,	  sum(sharedservicepercent * CommercialCancelledPosBilling) CommercialCancelledPosBilling
+			,	  sum(sharedservicepercent * cancelledprebilling) cancelledprebilling
+			,     sum(sharedservicepercent * ammounttopartner) ammounttopartner
+			,	  sum(sharedservicepercent * promocodes) promocodes
+			,     sum(sharedservicepercent * aquirerfee) aquirerfee
+			,	  sum(sharedservicepercent * anticipationcost) anticipationcost
+			,	  sum(sharedservicepercent * taxes) taxes
+			,	  sum(sharedservicepercent * extrafees) extrafees
+			,     sum(sharedservicepercent * cancellationfinancecharge) cancellationfinancecharge
+			,     sum(sharedservicepercent * cancellationextrafeespu) cancellationextrafeespu
+			,     sum(sharedservicepercent * cancellationextrafees) cancellationextrafees
+			,	  sum(sharedservicepercent * antifraudfee) antifraudfee
+			,     sum(sharedservicepercent * extrafeespu) extrafeespu
+			,	  sum(sharedservicepercent * financecharge) financecharge
+			,     sum(sharedservicepercent * NoShow) NoShow
+			,     sum(sharedservicepercent * Adjustment) Adjustment
+			,     cast(0 as decimal(15,2)) NetRevenueLastDay
+			,     cast(0 as decimal(15,2)) NetRevenueCity
+			,     cast(0 as decimal(15,2)) NetRevenueCityLastDay
+			,     cast(0 as decimal(15,2)) GoalCity
+			,     sum(sharedservicepercent * cancellationpromocodes) cancellationpromocodes
+			,	  sum(sharedservicepercent * administrativefee) administrativefee
+			,	  sum(sharedservicepercent * administrativefeecancelled) administrativefeecancelled
+			--,	  sourceid sourceid --inclusão para identificar sites PU/Groupon
+			from reports.DailyCommercialRevenueGrossProfit
+			where EventDate between (select case when datepart(day,getdate()) = 1 then dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date)) else cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date) end ) and (select case when datepart(day,getdate()) = 1 then dateadd(day,-1,dateadd(month,1,dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date))))	else cast(dateadd(day, -1,getdate()) as date) end )
+			group by
+				  EventMonth
+			,     EventYear
+			,     Manager
+			,	  Coordinator
+			,	  team
+			--,     Coordinator
+			--,	  sourceid --inclusão para identificar sites PU/Groupon
+		) xx
+	group by
+		EventMonth
+		,EventYear
+		,"Group"
+		,Manager
+		,Region
+		,Coordinator
+		,Variable
+		--,sourceid --inclusão para identificar sites PU/Groupon
+--
+union all
+--
+	select
+		  a.EventMonth
+	,     a.EventYear
+	,     a."Group"
+	,     a.Manager
+	,     a.Region
+	,     a.Coordinator
+	,     a.Team
+	,     a.Variable
+	,     a.GrossSales
+	,     a.GrossSalesPUCommission
+	,     a.CancelledPreBillingPU
+	,     a.CancelledPosBillingPU
+	,	  a.CommercialCancelledPosBilling
+	,	  a.cancelledprebilling
+	,	  a.ammounttopartner
+	,	  a.promocodes
+	,	  a.aquirerfee
+	,	  a.anticipationcost
+	,	  a.taxes
+	,	  a.extrafees
+	,	  a.cancellationfinancecharge
+	,	  a.cancellationextrafeespu
+	,	  a.cancellationextrafees
+	,	  a.antifraudfee
+	,	  a.extrafeespu
+	,	  a.financecharge
+	,     a.NoShow
+	,     a.Adjustment
+	,     a.NetRevenueLastDay
+	,     b.NetRevenueCity
+	,     b.NetRevenueCityLastDay
+	,     g.grossprofitgoal GoalCity
+	,	  a.cancellationpromocodes
+	,	  a.administrativefee
+	,	  a.administrativefeecancelled
+	--,	  a.sourceid --inclusão para identificar sites PU/Groupon
+	from
+	(
+		  select
+				EventMonth
+		  ,     EventYear
+		  ,     'Executivo de Vendas' "Group"
+		  ,     Manager
+		  ,     Region
+		  ,     Coordinator
+		  ,     Team
+		  ,     OwnerERP Variable
+		  ,     sum(sharedservicepercent * GrossSales) GrossSales
+		  ,     sum(sharedservicepercent * GrossSalesPUCommission) GrossSalesPUCommission
+		  ,     sum(sharedservicepercent * CancelledPreBillingPU) CancelledPreBillingPU
+		  ,     sum(sharedservicepercent * CancelledPosBillingPU) CancelledPosBillingPU
+		  ,	    sum(sharedservicepercent * CommercialCancelledPosBilling) CommercialCancelledPosBilling
+		  ,	    sum(sharedservicepercent * cancelledprebilling) cancelledprebilling
+		  ,     sum(sharedservicepercent * ammounttopartner) ammounttopartner
+		  ,	    sum(sharedservicepercent * promocodes) promocodes
+		  ,     sum(sharedservicepercent * aquirerfee) aquirerfee
+		  ,	    sum(sharedservicepercent * anticipationcost) anticipationcost
+		  ,	    sum(sharedservicepercent * taxes) taxes
+		  ,	    sum(sharedservicepercent * extrafees) extrafees
+		  ,     sum(sharedservicepercent * cancellationfinancecharge) cancellationfinancecharge
+		  ,     sum(sharedservicepercent * cancellationextrafeespu) cancellationextrafeespu
+		  ,     sum(sharedservicepercent * cancellationextrafees) cancellationextrafees
+		  ,	    sum(sharedservicepercent * antifraudfee) antifraudfee
+		  ,     sum(sharedservicepercent * extrafeespu) extrafeespu
+		  ,	    sum(sharedservicepercent * financecharge) financecharge
+		  ,     sum(sharedservicepercent * NoShow) NoShow
+		  ,     sum(sharedservicepercent * Adjustment) Adjustment
+		  ,     sum(case when EventDate = (select case when datepart(day,getdate()) = 1 then dateadd(day,-1,dateadd(month,1,dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date))))	else cast(dateadd(day, -1,getdate()) as date) end ) then GrossSalesPUCommission-CancelledPreBillingPU-CancelledPosBillingPU+NoShow+Adjustment+financecharge+extrafeespu else 0 end) NetRevenueLastDay
+		  ,     sum(sharedservicepercent * cancellationpromocodes) cancellationpromocodes
+		  ,	    sum(sharedservicepercent * administrativefee) administrativefee
+		  ,	    sum(sharedservicepercent * administrativefeecancelled) administrativefeecancelled
+		  --,		sourceid --inclusão para identificar sites PU/Groupon
+		  from reports.DailyCommercialRevenueGrossProfit dcr
+		  where EventDate between (select case when datepart(day,getdate()) = 1 then dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date)) else cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date) end ) and (select case when datepart(day,getdate()) = 1 then dateadd(day,-1,dateadd(month,1,dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date))))	else cast(dateadd(day, -1,getdate()) as date) end )
+		  group by
+				EventMonth
+		  ,     EventYear
+		  ,     Manager
+		  ,     Region
+		  ,     Coordinator
+		  ,     Team
+		  ,     OwnerERP
+		  --,		sourceid --inclusão para identificar sites PU/Groupon
+		  ) a
+		  
+	left join
+		(
+		  select
+				EventMonth
+		  ,     EventYear
+		  ,     Team
+		  ,     cast(sum(GrossSalesPUCommission-CancelledPreBillingPU-CancelledPosBillingPU+NoShow+Adjustment+financecharge+extrafeespu) as decimal(15,2)) NetRevenueCity
+		  ,     cast(sum(case when EventDate = (select case when datepart(day,getdate()) = 1 then dateadd(day,-1,dateadd(month,1,dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date))))	else cast(dateadd(day, -1,getdate()) as date) end ) then GrossSalesPUCommission-CancelledPreBillingPU-CommercialCancelledPosBilling+NoShow+Adjustment else 0 end) as decimal(15,2)) NetRevenueCityLastDay
+		  --,		sourceid --inclusão para identificar sites PU/Groupon
+		  from reports.DailyCommercialRevenueGrossProfit
+		  where EventDate between (select case when datepart(day,getdate()) = 1 then dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date)) else cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date) end ) and (select case when datepart(day,getdate()) = 1 then dateadd(day,-1,dateadd(month,1,dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date))))	else cast(dateadd(day, -1,getdate()) as date) end )
+		  group by
+				EventMonth
+		  ,     EventYear
+		  ,     Team
+		  --,		sourceid --inclusão para identificar sites PU/Groupon
+		  ) b
+		  on b.EventMonth = a.EventMonth
+		  and b.EventYear = a.EventYear
+		  and b.Team = a.Team
+		  --and b.sourceid = a.sourceid --inclusão para identificar sites PU/Groupon
+	--
+	left join reports.goal_grossprofit g
+		on g.Variable = a.Team
+		and g."Month" = a.EventMonth
+		and g."Year" = a.EventYear
+		and g."Group" = 'Cidade'
+		  
+	) r
+	
+	on g."Month" = r.EventMonth
+	and g."Year" = r.EventYear
+	and upper(g.Variable) = upper(r.Variable)
+	and g."Group" = r."Group"
+	--and g.sourceid = r.sourceid --inclusão para identificar sites PU/Groupon - Comentado pois neste momento, não há esta separação nas metas
+	--
+	left join
+	(
+		select
+			OwnerERP Variable
+		,	'Executivo de Vendas' "Group"
+		,	sum(
+				case
+					when datediff(day,(select case when datepart(day,getdate()) = 1 then dateadd(day,-1,dateadd(month,1,dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date))))	else cast(dateadd(day, -1,getdate()) as date) end ),EventDate) between 1 and 7 then ForecastGrossSalesPUCommission
+					else 0
+				end
+				) ForecastGrossSalesPUCommission7
+		,	sum(
+				case
+					when datediff(day,(select case when datepart(day,getdate()) = 1 then dateadd(day,-1,dateadd(month,1,dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date))))	else cast(dateadd(day, -1,getdate()) as date) end ),EventDate) between 8 and 15 then ForecastGrossSalesPUCommission
+					else 0
+				end
+				) ForecastGrossSalesPUCommission15
+		,	sum(
+				case
+					when datediff(day,(select case when datepart(day,getdate()) = 1 then dateadd(day,-1,dateadd(month,1,dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date))))	else cast(dateadd(day, -1,getdate()) as date) end ),EventDate) between 16 and 22 then ForecastGrossSalesPUCommission
+					else 0
+				end
+				) ForecastGrossSalesPUCommission22
+		,	sum(
+				case
+					when datediff(day,(select case when datepart(day,getdate()) = 1 then dateadd(day,-1,dateadd(month,1,dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date))))	else cast(dateadd(day, -1,getdate()) as date) end ),EventDate) between 23 and 30 then ForecastGrossSalesPUCommission
+					else 0
+				end
+				) ForecastGrossSalesPUCommission30
+		from reports.ForecastDeals f
+		group by
+			OwnerERP
+	--
+		union all
+	--
+		select
+			Team Variable
+		,	'Cidade' "Group"
+		,	sum(
+				case
+					when datediff(day,(select case when datepart(day,getdate()) = 1 then dateadd(day,-1,dateadd(month,1,dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date))))	else cast(dateadd(day, -1,getdate()) as date) end ),EventDate) between 1 and 7 then ForecastGrossSalesPUCommission
+					else 0
+				end
+				) ForecastGrossSalesPUCommission7
+		,	sum(
+				case
+					when datediff(day,(select case when datepart(day,getdate()) = 1 then dateadd(day,-1,dateadd(month,1,dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date))))	else cast(dateadd(day, -1,getdate()) as date) end ),EventDate) between 8 and 15 then ForecastGrossSalesPUCommission
+					else 0
+				end
+				) ForecastGrossSalesPUCommission15
+		,	sum(
+				case
+					when datediff(day,(select case when datepart(day,getdate()) = 1 then dateadd(day,-1,dateadd(month,1,dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date))))	else cast(dateadd(day, -1,getdate()) as date) end ),EventDate) between 16 and 22 then ForecastGrossSalesPUCommission
+					else 0
+				end
+				) ForecastGrossSalesPUCommission22
+		,	sum(
+				case
+					when datediff(day,(select case when datepart(day,getdate()) = 1 then dateadd(day,-1,dateadd(month,1,dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date))))	else cast(dateadd(day, -1,getdate()) as date) end ),EventDate) between 23 and 30 then ForecastGrossSalesPUCommission
+					else 0
+				end
+				) ForecastGrossSalesPUCommission30
+		from reports.ForecastDeals f
+		group by
+			Team
+	--
+		union all
+	--
+		select
+			Coordinator Variable
+		,	'Coordenador' "Group"
+		,	sum(
+				case
+					when datediff(day,(select case when datepart(day,getdate()) = 1 then dateadd(day,-1,dateadd(month,1,dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date))))	else cast(dateadd(day, -1,getdate()) as date) end ),EventDate) between 1 and 7 then ForecastGrossSalesPUCommission
+					else 0
+				end
+				) ForecastGrossSalesPUCommission7
+		,	sum(
+				case
+					when datediff(day,(select case when datepart(day,getdate()) = 1 then dateadd(day,-1,dateadd(month,1,dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date))))	else cast(dateadd(day, -1,getdate()) as date) end ),EventDate) between 8 and 15 then ForecastGrossSalesPUCommission
+					else 0
+				end
+				) ForecastGrossSalesPUCommission15
+		,	sum(
+				case
+					when datediff(day,(select case when datepart(day,getdate()) = 1 then dateadd(day,-1,dateadd(month,1,dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date))))	else cast(dateadd(day, -1,getdate()) as date) end ),EventDate) between 16 and 22 then ForecastGrossSalesPUCommission
+					else 0
+				end
+				) ForecastGrossSalesPUCommission22
+		,	sum(
+				case
+					when datediff(day,(select case when datepart(day,getdate()) = 1 then dateadd(day,-1,dateadd(month,1,dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date))))	else cast(dateadd(day, -1,getdate()) as date) end ),EventDate) between 23 and 30 then ForecastGrossSalesPUCommission
+					else 0
+				end
+				) ForecastGrossSalesPUCommission30
+		from reports.ForecastDeals f
+		group by
+			Coordinator
+	--
+		union all
+	--
+		select
+			Manager Variable
+		,	'Gerente' "Group"
+		,	sum(
+				case
+					when datediff(day,(select case when datepart(day,getdate()) = 1 then dateadd(day,-1,dateadd(month,1,dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date))))	else cast(dateadd(day, -1,getdate()) as date) end ),EventDate) between 1 and 7 then ForecastGrossSalesPUCommission
+					else 0
+				end
+				) ForecastGrossSalesPUCommission7
+		,	sum(
+				case
+					when datediff(day,(select case when datepart(day,getdate()) = 1 then dateadd(day,-1,dateadd(month,1,dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date))))	else cast(dateadd(day, -1,getdate()) as date) end ),EventDate) between 8 and 15 then ForecastGrossSalesPUCommission
+					else 0
+				end
+				) ForecastGrossSalesPUCommission15
+		,	sum(
+				case
+					when datediff(day,(select case when datepart(day,getdate()) = 1 then dateadd(day,-1,dateadd(month,1,dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date))))	else cast(dateadd(day, -1,getdate()) as date) end ),EventDate) between 16 and 22 then ForecastGrossSalesPUCommission
+					else 0
+				end
+				) ForecastGrossSalesPUCommission22
+		,	sum(
+				case
+					when datediff(day,(select case when datepart(day,getdate()) = 1 then dateadd(day,-1,dateadd(month,1,dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date))))	else cast(dateadd(day, -1,getdate()) as date) end ),EventDate) between 23 and 30 then ForecastGrossSalesPUCommission
+					else 0
+				end
+				) ForecastGrossSalesPUCommission30
+		from reports.ForecastDeals f
+		group by
+			Manager
+	--
+		union all
+	--
+		select
+			Region Variable
+		,	'Regi�o' "Group"
+		,	sum(
+				case
+					when datediff(day,(select case when datepart(day,getdate()) = 1 then dateadd(day,-1,dateadd(month,1,dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date))))	else cast(dateadd(day, -1,getdate()) as date) end ),EventDate) between 1 and 7 then ForecastGrossSalesPUCommission
+					else 0
+				end
+				) ForecastGrossSalesPUCommission7
+		,	sum(
+				case
+					when datediff(day,(select case when datepart(day,getdate()) = 1 then dateadd(day,-1,dateadd(month,1,dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date))))	else cast(dateadd(day, -1,getdate()) as date) end ),EventDate) between 8 and 15 then ForecastGrossSalesPUCommission
+					else 0
+				end
+				) ForecastGrossSalesPUCommission15
+		,	sum(
+				case
+					when datediff(day,(select case when datepart(day,getdate()) = 1 then dateadd(day,-1,dateadd(month,1,dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date))))	else cast(dateadd(day, -1,getdate()) as date) end ),EventDate) between 16 and 22 then ForecastGrossSalesPUCommission
+					else 0
+				end
+				) ForecastGrossSalesPUCommission22
+		,	sum(
+				case
+					when datediff(day,(select case when datepart(day,getdate()) = 1 then dateadd(day,-1,dateadd(month,1,dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date))))	else cast(dateadd(day, -1,getdate()) as date) end ),EventDate) between 23 and 30 then ForecastGrossSalesPUCommission
+					else 0
+				end
+				) ForecastGrossSalesPUCommission30
+		from reports.ForecastDeals f
+		group by
+			Region
+	--
+		union all
+	--
+		select
+			'Total Geral' Variable
+		,	'Cidade' "Group"
+		,	sum(
+				case
+					when datediff(day,(select case when datepart(day,getdate()) = 1 then dateadd(day,-1,dateadd(month,1,dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date))))	else cast(dateadd(day, -1,getdate()) as date) end ),EventDate) between 1 and 7 then ForecastGrossSalesPUCommission
+					else 0
+				end
+				) ForecastGrossSalesPUCommission7
+		,	sum(
+				case
+					when datediff(day,(select case when datepart(day,getdate()) = 1 then dateadd(day,-1,dateadd(month,1,dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date))))	else cast(dateadd(day, -1,getdate()) as date) end ),EventDate) between 8 and 15 then ForecastGrossSalesPUCommission
+					else 0
+				end
+				) ForecastGrossSalesPUCommission15
+		,	sum(
+				case
+					when datediff(day,(select case when datepart(day,getdate()) = 1 then dateadd(day,-1,dateadd(month,1,dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date))))	else cast(dateadd(day, -1,getdate()) as date) end ),EventDate) between 16 and 22 then ForecastGrossSalesPUCommission
+					else 0
+				end
+				) ForecastGrossSalesPUCommission22
+		,	sum(
+				case
+					when datediff(day,(select case when datepart(day,getdate()) = 1 then dateadd(day,-1,dateadd(month,1,dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date))))	else cast(dateadd(day, -1,getdate()) as date) end ),EventDate) between 23 and 30 then ForecastGrossSalesPUCommission
+					else 0
+				end
+				) ForecastGrossSalesPUCommission30
+		from reports.ForecastDeals f
+		) x
+	on upper(g.Variable) = upper(x.Variable)
+	and g."Group" = x."Group"
+where g."Month" = date_part(month,(select case when datepart(day,getdate()) = 1 then dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date)) else cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date) end ))
+and g."Year" = date_part(year,(select case when datepart(day,getdate()) = 1 then dateadd(day,-1,dateadd(month,1,dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date))))	else cast(dateadd(day, -1,getdate()) as date) end ))
+;
+delete from reports.commercialachievementgrossprofit
+where "Month" = date_part(month,(select case when datepart(day,getdate()) = 1 then dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date)) else cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date) end ))
+and "Year" = date_part(year,(select case when datepart(day,getdate()) = 1 then dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date)) else cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date) end ))
+;
+insert into reports.commercialachievementgrossprofit
+select  * from #commercialachievementgrossprofit
+;
+commit
+

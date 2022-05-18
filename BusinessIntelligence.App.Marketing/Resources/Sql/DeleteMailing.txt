@@ -1,0 +1,2 @@
+﻿
+delete from dbo.MailingUserAccount where CampaignId in (<@CampaignIds@>)

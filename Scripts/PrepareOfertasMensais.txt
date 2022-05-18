@@ -1,0 +1,161 @@
+﻿TRUNCATE TABLE reports.Ofertas_Mensais;
+INSERT INTO reports.Ofertas_Mensais(
+"Contrato"
+,	"Pagina"
+,	"Tag region"
+,	bairro
+, 	"Mes Venda"
+,	"Ano Venda"
+,	uid
+,	"OF"
+,	"Parceiro"
+,	"Categoria"
+,	"Tipo Site"
+,	"Categoria Site"
+,	"Sub Categoria Site"
+,	"Sub Sub categoria"
+,	"Condicao Pagamento"
+,	"Expire Date"
+,	"Inicio Oferta"
+,	"Fim Oferta"
+,	"Proprietario Oferta"
+,	"Time"
+,	"Coordenador"
+,	"Gerente"
+,	"Oferta no ar"
+,	"Grupo Economico"
+,	"Campanha Marketing"
+,	"Fonte de Pesquisa"
+,	"Fonte de Pesquisa Oferta"
+,	planner
+,   "Coord Plan"
+,   "Tipo Pagamento"
+,	Marca
+,	"Discount Name"
+,	"Commission"
+,	"GrossSales"
+,	"GrosssalesPuCommission"
+,	"Cancelamento Pre Pu"
+,	"Cancelamento Pos Pu"
+,	"NoShow"
+,	ROL
+,	"Cupons Vendidos"
+,	"venda mobile"
+,	"taxa_parcelamento"
+,	"taxa_adquirente"
+,	"antifraude"
+,	"promocodes"
+,	"custo_antecipacao"
+,	"cancelamento_promocodes"
+, 	"lucro_bruto"
+,	"GMV")
+SELECT 
+    "Contrato"
+,	"Pagina"
+,	"Tag region"
+,	bairro
+, 	"Mes Venda"
+,	"Ano Venda"
+,	uid
+,	"OF"
+,	"Parceiro"
+,	"Categoria"
+,	"Tipo Site"
+,	"Categoria Site"
+,	"Sub Categoria Site"
+,	"Sub Sub categoria"
+,	"Condicao Pagamento"
+,	"Expire Date"
+,	"Inicio Oferta"
+,	"Fim Oferta"
+,	"Proprietario Oferta"
+,	"Time"
+,	"Coordenador"
+,	"Gerente"
+,	"Oferta no ar"
+,	"Grupo Economico"
+,	"Campanha Marketing"
+,	"Fonte de Pesquisa"
+,	"Fonte de Pesquisa Oferta"
+,	planner
+,   "Coord Plan"
+,   "Tipo Pagamento"
+,	Marca
+,	"Discount Name"
+,	CASE WHEN GrossSales = 0 THEN 0 ELSE GrosssalesPuCommission/GrossSales END AS "Commission"
+,	"GrossSales"
+,	"GrosssalesPuCommission"
+,	"Cancelamento Pre Pu"
+,	"Cancelamento Pos Pu"
+,	"NoShow"
+,	ROL
+,	"Cupons Vendidos"
+,	"venda mobile"
+,	"taxa_parcelamento"
+,	"taxa_adquirente"
+,	"antifraude"
+,	"promocodes"
+,	"custo_antecipacao"
+,	"cancelamento_promocodes"
+, 	"lucro_bruto"
+,	"GMV"
+FROM (
+select
+	de.Contract_number "Contrato"
+,	pagename "Pagina"
+,	coalesce(accountregion, 'N/A') "Tag region"
+,	bairro
+, 	date_part('month', dateforsale) "Mes Venda"
+,	date_part('year', dateforsale) "Ano Venda"
+,	de.uid
+,	'OF-' + right('0000000000' + cast(de.idoferta as varchar), 10) "OF"
+,	partnername "Parceiro"
+,	category_name "Categoria"
+,	tipo_site "Tipo Site"
+,	categoria_site "Categoria Site"
+,	sub_categoria_site "Sub Categoria Site"
+,	sub_sub_categoria "Sub Sub categoria"
+,	condicao_pagamento "Condicao Pagamento"
+,	expire_date "Expire Date"
+,	discount_start "Inicio Oferta"
+,	discount_end "Fim Oferta"
+,	proprietario_oferta "Proprietario Oferta"
+,	team "Time"
+,	coordinator "Coordenador"
+,	manager "Gerente"
+,	public "Oferta no ar"
+,	grupo_economico "Grupo Economico"
+,	campanha_marketing "Campanha Marketing"
+,	fonte_de_pesquisa "Fonte de Pesquisa"
+,	fonte_de_pesquisa_oferta "Fonte de Pesquisa Oferta"
+,	planner
+,   coordinators "Coord Plan"
+,   tipo_de_pagamento "Tipo Pagamento"
+,	case 
+	   when (de.channelid = 1) then 'Peixe Urbano'
+	   when (de.channelid = 6) then 'Groupon'
+	  end marca
+,	TRIM(regexp_replace(Max(Discountname), '\r|\n|\t','g')) as "Discount Name"
+,	sum(de.grosssales) "GrossSales"
+,	sum(grosssalespucommission) "GrosssalesPuCommission"
+,	sum(de.cancelamento_pre_pu) "Cancelamento Pre Pu"
+,	sum(de.cancelamento_pos_pu) "Cancelamento Pos Pu"
+,	sum(de.noShow) "NoShow"
+,	sum(de.rol) ROL
+,	sum(de.sold_cupons) "Cupons Vendidos"
+,	sum(de.venda_mobile) "venda mobile"
+,	sum(de.taxa_parcelamento) "taxa_parcelamento"
+,	sum(de.taxa_adquirente) "taxa_adquirente"
+,	sum(de.antifraude) "antifraude"
+,	sum(de.promocodes) "promocodes"
+,	sum(de.custo_antecipacao) "custo_antecipacao"
+,	sum(de.cancelamento_promocodes) "cancelamento_promocodes"
+, 	sum(de.lucro_bruto) "lucro_bruto"
+,	sum(de.gmv) "GMV"
+from reports.dailyentries de
+WHERE dateforsale between CAST(((DATEADD(month,-5,GETDATE()))-EXTRACT(DAY FROM (DATEADD(month,-5,GETDATE())))) + 1 AS DATE) and getdate()-1
+group by 
+	1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30,31
+);commit;
+INSERT INTO stage.PentahoImportControl (ImportDate,Report)
+SELECT GETDATE() AS ImportDate, 'Carga_Ofertas_Mensais' AS Report;

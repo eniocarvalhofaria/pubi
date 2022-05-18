@@ -1,0 +1,51 @@
+﻿
+delete from reports.returnpathreport
+where (date,ipaddress) in
+(
+	select distinct 
+		date
+	,	ipaddress
+	from reports.returnpathreportstage
+)
+;
+insert into reports.returnpathreport
+select
+	date
+,	ipaddress
+,	microsoftstate
+,	yahoostate
+,	globalstate
+,	criticaltraps
+,	significanttraps
+,	rptrapnetwork1
+,	rptrapnetwork2
+,	microsoftsrdvolume
+,	microsoftsrdjunk
+,	microsoftsrdrate
+,	microsoftvolume
+,	microsoftinboxvolume
+,	microsoftinboxcomplaintrate
+,	microsoftcomplaints
+,	microsoftoverallcomplaintrate
+,	yahoovolume
+,	yahooinboxvolume
+,	yahooinboxcomplaintrate
+,	yahoocomplaints
+,	yahoooverallcomplaintrate
+,	comcastvolume
+,	comcastcomplaints
+,	comcastcomplaintrate
+,	returnpathnetworkvolume
+,	returnpathnetworkcomplaints
+,	returnpathnetworkcomplaintrate
+,	unknownusersvolume
+,	unknownuserscount
+,	unknownuserrate
+,	filedate
+ from
+(
+select
+rank() over(partition by date,ipaddress order by filedate desc) ordem
+,	s.* from reports.returnpathreportstage s
+) x
+where ordem = 1

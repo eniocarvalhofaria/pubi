@@ -1,0 +1,122 @@
+	
+drop table if exists #approvalMktSource;
+drop table if exists category;
+
+create temporary table category
+(
+		unifieddiscountid int
+	,	categoryType varchar(500)
+	,	category varchar(500)
+	,	subcategory varchar(500)
+)
+distkey(unifieddiscountid)
+sortkey(unifieddiscountid);
+
+insert into category
+	select 
+		unifieddiscountid
+	,	ctype.name categoryType
+	,	cg.name category
+	,	ct.name	subcategory
+	from
+	(
+		select 
+			ud.unifieddiscountid
+		,	b.CategoryId
+		from reports.buyoptionCategories b 
+		inner join reports.sfbuyingoption bo 
+		on b.buyoptionid = bo.buyingoptionid
+		inner join ods.unifieddiscount ud 
+		on bo.offerid = ud.idoferta
+		group by 1,2
+	) x
+	inner join reports.cmcategory ct	on x.CategoryId = ct.CategoryId
+	inner join reports.cmcategorygroup cg	on ct.CategoryGroupId = cg.categorygroupid
+	inner join reports.cmcategorytype ctype	on cg.CategorytypeId = ctype.CategorytypeId;
+
+
+
+select
+	datepart(year,PurchaseDate) eventYear
+,	datepart(month,PurchaseDate) eventMonth
+,	datepart(day,PurchaseDate) eventDay
+,	PurchaseDate
+,	s.mktSourceName
+,	coalesce(c.CategoryName,'NID') CategoryName
+,	coalesce(cat.category,'NID') CategorySite
+,	coalesce(cat.subcategory,'NID') SubCategorySite
+,	sum(QTYTransactions) QTYTransactions
+,   	sum(case when approvalstatusid in(1,12) then QTYTransactions else 0 end) approvedQTYTransactions
+,	sum(QTYCoupons) QTYCoupons
+,	sum(PurchaseValue) PurchaseValue
+,	sum(FinanceCharge) FinanceCharge
+,	sum(TransactionValue) TransactionValue
+,	sum(Credits) Credits
+,	sum(promocodes) promocodes
+,	sum(SubmittedValue) SubmittedValue
+,   	sum(case when approvalstatusid in(1,12) then PurchaseValue else 0 end) PurchaseValueApproved
+,   	sum(case when approvalstatusid in(1,12) then submittedvalue else 0 end) approvedValue
+,	sum(case when approvalstatusid in(7,9,8,12,1,2) then submittedvalue else 0 end) ProcessedValue
+,   	sum(case when approvalstatusid in(1,12) and isfirst = 1 then PurchaseValue else 0 end) FirstPurchaseValueApproved
+,   	sum(case when approvalstatusid in(1,12) and isReactivation = 1 then PurchaseValue else 0 end) ReactivationPurchaseValueApproved
+,	sum(sumPayments) sumPayments
+,   	sum(case when approvalstatusid in(1,12) then grossrevenue else 0 end) grossrevenueApproved
+,	cast(0.00 as decimal(18,2)) grossprofit
+,	case 
+		when a.channelid = 1 then 'Peixe Urbano'
+		when a.channelid = 6 then 'Groupon'
+	end Site
+into #approvalMktSource
+from reports.approvalPurchases a
+left join reports.mktSource s on a.mktSourceId = s.mktSourceId
+left join reports.UnifiedDiscountCategory udc on a.UnifiedDiscountId = udc.UnifiedDiscountId 
+left join reports.Category c on udc.CategoryId = c.CategoryId
+left join reports.valueRange vr on a.valueRangeId = vr.valueRangeId
+left join category cat on a.unifieddiscountid = cat.unifieddiscountid
+group by 1,2,3,4,5,6,7,8,26
+;
+
+
+insert into #approvalMktSource
+(
+	eventYear
+,	eventMonth
+,	eventDay
+,	purchaseDate
+,	mktSourceName
+,	CategoryName
+,	CategorySite
+,	SubCategorySite
+,	grossprofit
+,	Site
+)
+select
+	datepart(year,eventDate) eventYear
+,	datepart(month,eventDate) eventMonth
+,	datepart(day,eventDate) eventDay
+,	eventDate
+,	m.mktSourceName
+,	coalesce(c.CategoryName,'NID') CategoryName
+,	coalesce(cat.category,'NID') CategorySite
+,	coalesce(cat.subcategory,'NID') SubCategorySite
+,	sum(grossprofit) grossprofit
+,	case 
+		when x.channelid = 1 then 'Peixe Urbano'
+		when x.channelid = 6 then 'Groupon'
+	end Site
+from  reports.vw_discountrevenue x
+left join reports.UnifiedDiscountCategory udc on x.UnifiedDiscountId = udc.UnifiedDiscountId 
+left join reports.Category c on udc.CategoryId = c.CategoryId
+left join  category  cat on x.unifieddiscountid = cat.unifieddiscountid
+left join  reports.mktsource m on x.mktsourceid = m.mktsourceid
+group by 
+1,2,3,4,5,6,7,8,10
+;
+
+delete from reports.approvalMktSource;
+
+insert into reports.approvalMktSource
+select * from #approvalMktSource;
+
+drop table category;
+drop table  #approvalMktSource;

@@ -1,0 +1,249 @@
+﻿update reports.EmailUnification_stage 
+set UnifiedEmailAddress =
+(
+select
+	min(eu.EmailAddress) NewUnifiedEmailAddress
+from reports.EmailUnification_stage eu
+left join ods.UserAccount ua1
+on ua1.EmailAddress = eu.UnifiedEmailAddress
+and ua1.ChannelId = 1
+inner join ods.UserAccount ua2
+on ua2.EmailAddress = eu.EmailAddress
+and ua2.ChannelId = 1
+where ua1.UserAccountId is null
+and eu.UnifiedEmailAddress = EmailUnification_stage.UnifiedEmailAddress
+and ua2.UserAccountId is not null
+group by UnifiedEmailAddress
+) ;
+delete from  reports.UserAccountUnification;
+
+insert into reports.UserAccountUnification
+select 
+
+	ua2.UserAccountId  
+,	ua1.UserAccountId UnifiedUserAccountId
+,	2 UnifiactionMethodId
+from reports.EmailUnification_stage eu
+inner join ods.UserAccount ua1
+on ua1.EmailAddress = eu.UnifiedEmailAddress
+and ua1.ChannelId = 1
+inner join ods.UserAccount ua2
+on ua2.EmailAddress = eu.EmailAddress
+and ua2.ChannelId = 1
+where eu.EmailAddress <> eu.UnifiedEmailAddress
+;
+
+insert into reports.UserAccountUnification
+select distinct 
+	UnifiedUserAccountId UserAccountId
+,	UnifiedUserAccountId
+,	UnifiactionMethodId
+from reports.UserAccountUnification
+where UnifiactionMethodId = 2
+;
+
+
+	select
+		mUserAccountId
+	,	case 
+			when a.UserAccountId = mUserAccountId 
+			then b.UnifiedUserAccountId 
+			when a.UserAccountId = a.UnifiedUserAccountId  
+			then mUserAccountId
+			else a.UserAccountId 
+		end uaid
+	,	a.UnifiedUserAccountId
+	into #TempUAUnification1
+	from reports.UserAccountUnification a
+	inner join
+	(
+		select 
+			min(UserAccountId) mUserAccountId
+		,	UnifiedUserAccountId 
+		from reports.UserAccountUnification
+		group by UnifiedUserAccountId
+		having UnifiedUserAccountId > min(UserAccountId)
+	) b 
+	on a.UnifiedUserAccountId = b.UnifiedUserAccountId
+;	
+update reports.UserAccountUnification
+set 
+	UnifiedUserAccountId = mUserAccountId
+,	UserAccountId = uaid
+from #TempUAUnification1
+where UserAccountUnification.UnifiedUserAccountId = #TempUAUnification1.UnifiedUserAccountId
+
+;
+
+drop table if exists  #CPFUnification;
+;
+
+insert into reports.useraccountcpf_stage
+select 
+	useraccountid
+,	cast(replace(replace(trim(p.cpf),'.',''),'-','') as decimal(18,0)) cpf
+from ods.purchasecpf p
+inner join ods.sales s
+on p.purchaseid = s.purchaseid	
+where 
+	length(trim(p.cpf)) = 14
+and	replace(replace(trim(p.cpf),'.',''),'-','') ~ '^[0-9]+$'
+and useraccountid not in (select useraccountid from reports.useraccountcpf_stage)
+;
+select 
+	ua2.UserAccountId  
+,	ua1.UserAccountId UnifiedUserAccountId
+,	3 UnifiactionMethodId
+into #CPFUnification
+from 
+	(
+	select 
+		min(UserAccountId) UserAccountId
+	,	CPF
+	from reports.useraccountcpf_stage
+	group by CPF
+	) ua1
+inner join reports.useraccountcpf_stage ua2
+on ua2.CPF = ua1.CPF
+and ua2.UserAccountId >= ua1.UserAccountId
+
+;
+
+
+drop table if exists  #CPFUnification2
+
+;
+select 
+	a.UserAccountId
+,	coalesce(min(b.UnifiedUserAccountId) over( partition by a.UnifiedUserAccountId), a.UnifiedUserAccountId) UnifiedUserAccountId
+into  #CPFUnification2
+from
+#CPFUnification a
+left join reports.UserAccountUnification b
+on a.UserAccountId = b.UserAccountId
+
+;
+
+insert into reports.UserAccountUnification
+select 
+	UserAccountId
+,	UnifiedUserAccountId
+,	3
+ from #CPFUnification2
+where UserAccountId not in
+(select UserAccountId from reports.UserAccountUnification)
+and UnifiedUserAccountId <> UserAccountId
+
+;
+insert into reports.UserAccountUnification
+select distinct 
+	UnifiedUserAccountId UserAccountId
+,	UnifiedUserAccountId
+,	UnifiactionMethodId
+from reports.UserAccountUnification
+where UnifiedUserAccountId not in
+(select UserAccountId from reports.UserAccountUnification)
+and UnifiactionMethodId = 3
+;
+update reports.UserAccountUnification
+set UnifiedUserAccountId = b.UnifiedUserAccountId
+from reports.UserAccountUnification a
+inner join 
+(
+	select distinct
+		d.UserAccountId
+	,	c.UnifiedUserAccountId
+	from
+	#CPFUnification2 c
+	inner join reports.UserAccountUnification d
+	on c.UserAccountId = d.UnifiedUserAccountId
+) b
+on
+a.UserAccountId = b.UserAccountId
+;
+drop table if exists #UserAccountCardInfo 
+;
+select distinct
+	ppd.UserAccountId
+,	CardNumber + rtrim(ltrim(CardHolderName)) CardInfo
+into #UserAccountCardInfo
+from ods.PurchasePaymentData ppd
+inner join ods.UserAccount au
+on au.UserAccountID = ppd.UserAccountID
+where ChannelId = 1
+and CardNumber is not null
+and substring(CardNumber,1,1) in ('3','4','5')
+;
+  drop table if exists #CardInfoUnification
+;
+
+select 
+	ua2.UserAccountId  
+,	min(ua1.UserAccountId) UnifiedUserAccountId
+,	4 UnifiactionMethodId
+into #CardInfoUnification
+from 
+	(
+	select 
+		min(UserAccountId) UserAccountId
+	,	CardInfo
+	from #UserAccountCardInfo
+	group by CardInfo
+	) ua1
+inner join #UserAccountCardInfo ua2
+on ua2.CardInfo = ua1.CardInfo
+and ua2.UserAccountId >= ua1.UserAccountId
+group by ua2.UserAccountId 
+;
+
+drop table if exists #CardInfoUnification2
+;
+
+select 
+	a.UserAccountId
+,	coalesce(min(b.UnifiedUserAccountId) over( partition by a.UnifiedUserAccountId), a.UnifiedUserAccountId) UnifiedUserAccountId
+into  #CardInfoUnification2
+from
+#CardInfoUnification a
+left join reports.UserAccountUnification b
+on a.UserAccountId = b.UserAccountId
+;
+	
+insert into reports.UserAccountUnification
+select 
+	UserAccountId
+,	UnifiedUserAccountId
+,	4
+ from #CardInfoUnification2
+where UserAccountId not in
+(select UserAccountId from reports.UserAccountUnification)
+and UnifiedUserAccountId <> UserAccountId
+;
+
+insert into reports.UserAccountUnification
+select distinct 
+	UnifiedUserAccountId UserAccountId
+,	UnifiedUserAccountId
+,	UnifiactionMethodId
+from reports.UserAccountUnification
+where UnifiedUserAccountId not in
+(select UserAccountId from reports.UserAccountUnification)
+and UnifiactionMethodId = 4
+;
+update reports.UserAccountUnification
+set UnifiedUserAccountId = b.UnifiedUserAccountId
+from reports.UserAccountUnification a
+inner join 
+(
+	select distinct
+		d.UserAccountId
+	,	c.UnifiedUserAccountId
+	from
+	#CardInfoUnification2 c
+	inner join reports.UserAccountUnification d
+	on c.UserAccountId = d.UnifiedUserAccountId
+) b
+on
+a.UserAccountId = b.UserAccountId
+
+

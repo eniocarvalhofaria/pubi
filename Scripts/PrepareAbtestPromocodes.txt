@@ -1,0 +1,106 @@
+create table #abtest (
+	useraccountid int
+	,emailaddress varchar(240)
+	,"group" char(1)
+	,"type" varchar(24)
+	,"reason" varchar(8)
+	,brand varchar(20)
+);
+
+
+--A >> usuários 30 dias sem compra (grupo de estudo)
+insert into #abtest (
+with compradoresgastrocidadesteste as (
+	select s.useraccountid 
+	from ods.sales s
+		left join ods.page pg on pg.pageid = s.salespageid
+		inner join (select s.useraccountid from ods.sales s left join ods.unifieddiscount ud on ud.unifieddiscountid = s.unifieddiscountid left join reports.contract con on con.contractid = ud.contractid where s."type" = 1 and con.category in ('Gastronomia e Bares', 'Comércio e Serviços Locais', 'Entretenimento, Cultura e Vida Noturna')) g on g.useraccountid=s.useraccountid
+	where s."type" = 1 -- and pg.pagename in ('Rio de Janeiro', 'São Paulo', 'São Paulo - Norte e Leste', 'São Paulo - Sul e Oeste', 'São Paulo - Grande ABC')
+	group by 1),
+	condA as (-- 30 dias da última compra)
+		select useraccountid
+		from ods.sales s
+		where s."type"=1
+		group by 1
+		having max(cast(coalesce(coalesce(s.AuthorizationDate,s.CuponCreationDate),s.PurchaseInitiated) as date)) < dateadd(day,-31,getdate()::date)),
+	condBalert as (--4 dias da última compra com cupom válido e não utilizado
+		select buyeruseraccountid useraccountid
+		from ods.cupon c
+		left join ods.sales s on s.purchaseid=c.purchaseid
+		left join ods.discount d on d.discountid=s.discountid
+		left join reports.discountdetails dd on d.discountid = dd.discountid
+		where s."type"=1 and c.fufillmentdate is null and c.canceldate is null and c.dateexpires::date >= dateadd(day,-1,getdate())::date and discountcategoryid in (2,3,5) and dd.subcategoria_site_oferta not in ('Cinema', 'Shows')
+		group by 1
+		having max(cast(coalesce(coalesce(s.AuthorizationDate,s.CuponCreationDate),s.PurchaseInitiated) as date)) < dateadd(day,-4,getdate()::date)),
+	condBpromo as (--2 dias da última utilização de cupom sem cupom válido
+		select buyeruseraccountid useraccountid
+		from ods.cupon c
+		left join ods.sales s on s.purchaseid=c.purchaseid
+		where s."type"=1 and not exists (select 1 from ods.cupon c2 where c2.fufillmentdate is null and canceldate is null and c2.dateexpires::date >= dateadd(day,-1,getdate())::date and c2.dateexpires::date is not null and c2.buyeruseraccountid =c.buyeruseraccountid)
+		group by buyeruseraccountid
+		having (max(cast(c.fufillmentdate as date)) < dateadd(day,-4,getdate()::date) and (max(cast(c.canceldate as date)) < dateadd(day,-4,getdate()::date) or max(cast(c.canceldate as date)) is null))),
+	compradoresoutrascidadesteste as (
+		select s.useraccountid 
+		from ods.sales s
+			left join ods.page pg on pg.pageid = s.salespageid
+			left join ods.unifieddiscount ud on ud.unifieddiscountid = s.unifieddiscountid
+			left join reports.contract con on con.contractid = ud.contractid
+		where s."type" = 1 and (pg.pagename in ('Belo Horizonte', 'Vitória', 'Salvador', 'Recife'))),
+	"16alert" as (
+		select l.useraccountid
+		from reports.abtest_promocodes_log l 
+		left join ods.useraccount u on u.useraccountid = l.useraccountid
+		where "type" = 'alert' and eventdate > u.datelastpurchase::date + 4
+		group by 1
+		having count(distinct eventdate >= 16)			
+	)
+--select top 100 ua.useraccountid, ua.emailaddress 
+--select count(1)
+--from ods.useraccount ua 
+--inner join compradoresgastrocidadesteste on compradoresgastrocidadesteste.useraccountid= ua.useraccountid
+--inner join condA a on a.useraccountid=ua.useraccountid
+--left join reports.abtest_promocodes b on b.useraccountid=ua.useraccountid and b."group"='A' and b."reason"='test'
+--where ua.UserAccountId in (select UserAccountId from ods.MailingList_UserAccount) and ua.ChannelId = 1 and ua.Status between 1 and 2 and ua.engagement in (7,10) and cast(right(ua.useraccountid,2) as char(2)) not in ('00','01','02','03') and right(ua.useraccountid,1) in (0,2,4,6,8) --and b.useraccountid is null
+select distinct
+	ua.useraccountid
+	,ua.emailaddress
+	,case when cgct.useraccountid is not null and condA.useraccountid is not null and cast(right(ua.useraccountid,2) as char(2)) not in ('00','01','02','03') and right(ua.useraccountid,1) in (0,2) then 'A'
+		when cgct.useraccountid is not null and (condBalert.useraccountid is not null or condBpromo.useraccountid is not null) and cast(right(ua.useraccountid,2) as char(2)) not in ('00','01','02','03') and right(ua.useraccountid,1) in (1,3,4,5,6,7,8,9) then 'B' 
+		when cgct.useraccountid is not null and condA.useraccountid is not null and cast(right(ua.useraccountid,2) as char(2)) in ('00','01','02','03') and right(ua.useraccountid,1) in (0,2) then 'Z'
+		when cgct.useraccountid is not null and (condBalert.useraccountid is not null or condBpromo.useraccountid is not null) and cast(right(ua.useraccountid,2) as char(2)) in ('00','01','02','03') and right(ua.useraccountid,1) in (1,3,4,5,6,7,8,9) then 'Z'
+		when cgct.useraccountid is null and condA.useraccountid is not null then 'A'
+		when cgct.useraccountid is null and condBalert.useraccountid is not null then 'A'
+		end as "group"
+	,case when cgct.useraccountid is not null and ((condA.useraccountid is not null and right(ua.useraccountid,1) in (0,2)) or (condbpromo.useraccountid is not null and right(ua.useraccountid,1) in (1,3,4,5,6,7,8,9))) then 'promocode'
+		when cgct.useraccountid is not null and condBalert.useraccountid is not null and right(ua.useraccountid,1) in (1,3,4,5,6,7,8,9) then 'alert'
+		when cgct.useraccountid is null and condA.useraccountid is not null then 'promocode'
+		when cgct.useraccountid is null and condBalert.useraccountid is not null and al.useraccountid is null then 'alert'
+		end as "type"
+	,case when cgct.useraccountid is not null and ((condA.useraccountid is not null and right(ua.useraccountid,1) in (0,2)) or ((condBalert.useraccountid is not null or condBpromo.useraccountid is not null) and right(ua.useraccountid,1) in (1,3,4,5,6,7,8,9)))  then 'test'
+		when cgct.useraccountid is null then 'old'
+		end	as "reason"
+	,case 
+		when channelid = 1 then 'Peixe Urbano'
+		when channelid = 6 then 'Groupon'
+	 end brand
+from ods.useraccount ua
+left join compradoresgastrocidadesteste cgct on cgct.useraccountid=ua.useraccountid
+left join condA on condA.useraccountid=ua.useraccountid
+left join condBalert on condBalert.useraccountid=ua.useraccountid
+left join condBpromo on condBpromo.useraccountid=ua.useraccountid
+left join compradoresoutrascidadesteste on compradoresoutrascidadesteste.useraccountid=ua.useraccountid
+left join "16alert" al on al.useraccountid = ua.useraccountid
+where ua.ChannelId in (1,6)
+	and ua.Status between 1 and 2
+	and ua.engagement in (7,10)
+	and ua.UserAccountId in (select UserAccountId from ods.MailingList_UserAccount)
+);
+
+--tabela de log (histórico) apenas do grupo de testes
+insert into reports.abtest_promocodes_log (select useraccountid, emailaddress, "group", "type", "reason", trunc(getdate()) eventdate, brand from #abtest where "group" is not null and reason<>'old');
+commit;
+
+--tabela diária de todos os envios de promocode
+truncate table reports.abtest_promocodes;
+insert into reports.abtest_promocodes (select * from #abtest where "group" <> 'Z' and "group" is not null);
+commit;

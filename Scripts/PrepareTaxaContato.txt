@@ -1,0 +1,85 @@
+--taxa de contato
+
+TRUNCATE TABLE reports.taxadecontato;
+
+INSERT INTO reports.taxadecontato
+SELECT
+    UnifiedPartnerName
+,	CNPJ
+,	CPF
+,	AccountID
+,	AccountStatus
+,	AccountCity
+,	AccountOwner
+,	RepresentantNameMGR
+,	CategoryName
+,	SUM(Tickets_partner*Rank) AS Tickets_partner
+,	SUM(QtyCoupons*Rank) AS QtyCoupons
+FROM(
+select
+	UnifiedPartnerName
+,	CNPJ
+,	CPF
+,	AccountID
+,	AccountStatus
+,	AccountCity
+,	AccountOwner
+,	RepresentantNameMGR
+,	CategoryName
+,	SUM(Tickets_partner) Tickets_partner
+,	SUM(QtyCoupons-QtyCouponsCancelled) QtyCoupons
+,   CAST((SUBSTRING(CAST(MinDateForSale AS VARCHAR(20)),1,4)+'-'+SUBSTRING(CAST(MinDateForSale AS VARCHAR(20)),6,2)+'-'+('01')) AS DATE) AS MinDateForSale
+,   0.5 AS Rank
+from REPORTS.PartnerSummary
+where CAST(MinDateForSale AS DATE) < DATEADD(MONTH,-4,CAST(GETDATE() AS DATE))
+GROUP BY 
+UnifiedPartnerName
+,	CNPJ
+,	CPF
+,	AccountID
+,	AccountStatus
+,	AccountCity
+,	AccountOwner
+,	RepresentantNameMGR
+,	CategoryName
+,   CAST((SUBSTRING(CAST(MinDateForSale AS VARCHAR(20)),1,4)+'-'+SUBSTRING(CAST(MinDateForSale AS VARCHAR(20)),6,2)+'-'+('01')) AS DATE)
+UNION ALL
+select
+	UnifiedPartnerName
+,	CNPJ
+,	CPF
+,	AccountID
+,	AccountStatus
+,	AccountCity
+,	AccountOwner
+,	RepresentantNameMGR
+,	CategoryName
+,	SUM(Tickets_partner) Tickets_partner
+,	SUM(QtyCoupons-QtyCouponsCancelled) QtyCoupons
+,   CAST((SUBSTRING(CAST(MinDateForSale AS VARCHAR(20)),1,4)+'-'+SUBSTRING(CAST(MinDateForSale AS VARCHAR(20)),6,2)+'-'+('01')) AS DATE) AS MinDateForSale
+,   1 AS Rank 
+from REPORTS.PartnerSummary
+where CAST(MinDateForSale AS DATE) >= DATEADD(MONTH,-4,CAST(GETDATE() AS DATE))
+GROUP BY 
+UnifiedPartnerName
+,	CNPJ
+,	CPF
+,	AccountID
+,	AccountStatus
+,	AccountCity
+,	AccountOwner
+,	RepresentantNameMGR
+,	CategoryName
+,   CAST((SUBSTRING(CAST(MinDateForSale AS VARCHAR(20)),1,4)+'-'+SUBSTRING(CAST(MinDateForSale AS VARCHAR(20)),6,2)+'-'+('01')) AS DATE)
+)Z
+GROUP BY 
+UnifiedPartnerName
+,	CNPJ
+,	CPF
+,	AccountID
+,	AccountStatus
+,	AccountCity
+,	AccountOwner
+,	RepresentantNameMGR
+,	CategoryName;
+commit

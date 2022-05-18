@@ -1,0 +1,6 @@
+﻿	select 
+		UserAccountId
+	,	cast(replace(replace(CPF,'.',''),'-','') as decimal(18,0)) CPF
+	from pudw.ods.UserAccount
+	where ChannelId = 1
+	and reports.dbo.ValidateCPF(CPF) = 'S'

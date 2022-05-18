@@ -1,0 +1,564 @@
+
+
+--mastercancelamento
+/*1*/
+drop table if exists cancels;
+create temporary table cancels 
+(
+  cuponid int4
+, purchaseid int4
+, discountid int4
+, unifieddiscountid int4
+, useraccountid int4
+, purchaseinitiated date
+, cuponcreationdate date
+, cancellationdate date
+, cancelledamount decimal(10,2)
+, cancelledamounttopartner decimal(10,2)
+, cancelledpucommission decimal(10,2)
+, ourcomission decimal(10,2)
+, affectbilling int4
+, iscancelledcouponpaidbypu int4
+, idoferta int4
+, CuponIDD int4
+, purchaseremailaddress varchar(256)
+, fufillmentdate date
+, disputedate date
+, code varchar(64)
+)
+diststyle all
+sortkey(cuponID);
+insert into cancels
+SELECT DISTINCT
+      CA.cuponID 
+     ,CA.purchaseid 
+     ,CA.discountid
+     ,CA.unifieddiscountid
+     ,CA.useraccountid
+     ,purchaseinitiated
+     ,cuponcreationdate
+     ,cancellationdate
+     ,cancelledamount
+     ,cancelledamounttopartner
+     ,cancelledpucommission
+     ,ourcomission
+     ,affectbilling
+     ,iscancelledcouponpaidbypu
+     ,idoferta
+     ,CM.CuponID AS CuponIDD
+     ,CU.purchaseremailaddress
+     ,CU.fufillmentdate
+     ,CU.disputedate
+     ,CU.code
+     FROM ods.cancellations CA
+     LEFT JOIN ods.unifieddiscount UD
+     ON UD.unifieddiscountid = CA.unifieddiscountid
+     LEFT JOIN stage.couponcancelationrequest CM
+     ON CM.CuponID = CA.CuponID
+     LEFT JOIN ods.cupon CU
+     ON CU.cuponID = CA.cuponID
+     WHERE CAST(CA.cancellationdate AS DATE) >= CAST(current_date-INTERVAL '90 day' AS DATE)
+     --EXTRACT(YEAR FROM cancellationdate) = 2017
+     ;commit;
+
+/*2*/
+drop table if exists mdl;
+create temporary table mdl
+(
+  unifieddiscountid integer
+, phoenix_type varchar(16)
+, phoenix_category varchar(48)
+, tag_description varchar(256)
+, title varchar(256)
+, category varchar(48)
+, coupon_coupon_end_date date
+, publishing_date date
+, expiration_date date
+, account_name varchar(112)
+, account_state varchar(8)
+, account_city varchar(36)
+)
+diststyle all
+sortkey(unifieddiscountid);
+insert into mdl
+SELECT 
+      unifieddiscountid
+     ,phoenix_type
+     ,phoenix_category
+     ,cast(tag_description as varchar(256))
+     ,cast(title as varchar(256))
+     ,category
+     ,coupon_coupon_end_date
+     ,publishing_date
+     ,expiration_date
+     ,account_name
+     ,account_state
+     ,account_city
+FROM(
+     SELECT 
+           unifieddiscountid
+          ,phoenix_type
+          ,phoenix_category
+          ,tag_description
+          ,title
+          ,category
+          ,coupon_coupon_end_date
+          ,publishing_date
+          ,expiration_date
+          ,account_name
+          ,account_state
+          ,account_city 
+          ,DENSE_RANK() OVER 
+                            (PARTITION BY unifieddiscountid ORDER BY phoenix_type
+                                                                    ,expiration_date DESC
+                                                                    ,coupon_coupon_end_date ASC
+                                                                    ,publishing_date ASC
+                                                                    ,phoenix_category
+                                                                    ,tag_description
+                                                                    ,title
+                                                                    ,category
+                                                                    ,account_name
+                                                                    ,account_state
+                                                                    ,account_city
+                             ) AS Rank
+     FROM(
+          SELECT DISTINCT         
+                         unifieddiscountid
+                        ,phoenix_type
+                        ,phoenix_category
+                        ,CASE WHEN phoenix_type = 'Local' AND phoenix_category = 'Beleza' THEN 'Beleza'
+                              WHEN phoenix_type = 'Produtos' THEN 'Produtos'
+                              WHEN phoenix_type = 'Viagens' THEN 'Viagens'
+                              ELSE listagg(tag_description,',') END AS tag_description
+                        ,title
+                        ,category
+                        ,coupon_coupon_end_date
+                        ,publishing_date
+                        ,expiration_date
+                        ,account_name
+                        ,TRIM(regexp_replace(account_state, '\r|\n|\t','g')) account_state
+                        ,account_city      
+          FROM(
+                SELECT DISTINCT         
+                               legacydata_unified_discount_id AS unifieddiscountid
+                              ,phoenix_type
+                              ,phoenix_category
+                              ,dlt.tag_description
+                              ,title
+                              ,category
+                              ,coupon_coupon_end_date
+                              ,publishing_date
+                              ,expiration_date
+                              ,account_name
+                              ,CASE WHEN LEN(account_state) > 2 THEN 'N/A'
+                                    WHEN LEN(account_state) < 2 THEN 'N/A'
+                                    ELSE account_state END AS account_state
+                              ,account_city
+                        FROM ods.mng_deals_Latest a
+                        left join (SELECT DISTINCT deal_id,tag_description FROM ods.mng_deals_latest_tags WHERE tag_name = 'subcategories') dlt 
+                        	on a.deal_id = dlt.deal_id
+                        inner join ods.cancellations c
+                        	on c.unifieddiscountid = a.legacydata_unified_discount_id
+                        WHERE CAST(C.cancellationdate AS DATE) >= CAST(current_date-INTERVAL '90 day' AS DATE)
+                        --EXTRACT(YEAR FROM C.cancellationdate) = 2017
+                ) H
+          GROUP BY unifieddiscountid
+                 ,phoenix_type
+                 ,phoenix_category
+                 ,title
+                 ,category
+                 ,coupon_coupon_end_date
+                 ,publishing_date
+                 ,expiration_date
+                 ,account_name
+                 ,account_state
+                 ,account_city
+          ) P
+    )
+WHERE Rank = 1
+;commit;
+
+/*3*/
+drop table if exists agendamento;
+create temporary table agendamento 
+(
+  c_digo_oferta_num_rico integer
+, cupom_Impresso varchar(96)
+, Agendamento varchar(32)
+)
+distkey(c_digo_oferta_num_rico)
+sortkey(c_digo_oferta_num_rico);
+insert into agendamento                    
+SELECT DISTINCT 
+                   CAST(c_digo_oferta_num_rico AS INT) c_digo_oferta_num_rico
+                 , CASE WHEN cto.of_necess_rio_levar_o_cupom_impresso is not null then cto.of_necess_rio_levar_o_cupom_impresso ELSE ccp.necess_rio_levar_o_cupom_impresso END as cupom_Impresso 
+                 , CASE WHEN cto.of_m_todo_de_agendamento is not null then cto.of_m_todo_de_agendamento ELSE ccp.agendamento_ser_feito END as Agendamento
+            FROM salesforce.ctofertas cto
+            right join salesforce.ctcontratopu ccp
+            on cto.contrato_pu = ccp.id
+            ;commit;
+
+/*4*/
+drop table if exists reembolso;
+create temporary table reembolso
+(
+  purchaseid integer
+, emailmgr varchar(56)
+)
+distkey(purchaseid)
+sortkey(purchaseid);           
+insert into reembolso    
+      SELECT DISTINCT purchaseid
+            ,emailaddress as emailmgr     
+      FROM (
+            SELECT DISTINCT rf.purchaseid
+                          ,ua.emailaddress
+                          ,rf.refunddate
+               ,DENSE_RANK() OVER 
+                                 (PARTITION BY rf.purchaseid ORDER BY rf.refunddate DESC,ua.emailaddress ASC) AS Rank
+           FROM ods.refunds rf
+           inner join ods.UserAccount ua
+           on rf.CreatorUserAccountID = ua.UserAccountID
+           WHERE CAST(refunddate AS DATE) BETWEEN GETDATE()-120 AND GETDATE()-1
+           --EXTRACT(YEAR FROM refunddate) = 2017
+           AND purchaseid IS NOT NULL
+           )
+      WHERE Rank = 1
+      ;commit;
+
+/*5*/
+drop table if exists tickets;     
+create temporary table tickets
+(
+  cuponid integer
+, ticketid integer
+, email varchar(56)
+)
+distkey(cuponid)
+sortkey(cuponid);           
+insert into tickets                
+   SELECT DISTINCT cuponid,ticketid,email
+   FROM(
+ 		SELECT c.cuponid,tc.ticketid,t.created,STI.email
+                       ,DENSE_RANK() OVER 
+                                         (PARTITION BY c.cuponid ORDER BY t.created DESC,tc.ticketid ASC,STI.email ASC) AS Rank
+        FROM ods.ticketcupom tc
+        INNER JOIN ods.ost_ticket t
+        	ON t.ticketid = tc.ticketid
+        LEFT JOIN ods.ost_staff STI
+        	ON STI.staff_id = t.staff_id
+        INNER JOIN ods.cupon c
+        	ON c.code = tc.codigo_cupom
+        WHERE CAST(t.created AS DATE) >= CAST(current_date-INTERVAL '120 day' AS DATE)
+        --EXTRACT(YEAR FROM t.created) = 2017
+        )    
+   WHERE Rank = 1     
+;commit;  
+
+/*6*/
+drop table if exists tipomotivo;
+create temporary table tipomotivo
+(
+  cuponid integer
+, tipocancelamento varchar(64)
+, motivo varchar(132)
+)
+distkey(cuponid)
+sortkey(cuponid);           
+insert into tipomotivo
+SELECT DISTINCT TMC.cuponid,MAX(tipocancelamento) AS tipocancelamento,MAX(motivo) AS motivo
+FROM stage.Cupom_Tipo_Motivo_Cancelamento TMC
+inner join ods.cancellations c
+on c.cuponid = TMC.cuponid
+WHERE CAST(C.cancellationdate AS DATE) >= CAST(current_date-INTERVAL '90 day' AS DATE)
+--EXTRACT(YEAR FROM C.cancellationdate) = 2017
+GROUP BY TMC.cuponid
+;commit;
+
+
+
+/*7*/
+drop table if exists Venda;
+create temporary table Venda
+(
+  purchaseid integer
+, sourceid integer
+, eventdate date
+, pagename varchar(56)
+)
+distkey(purchaseid)
+sortkey(purchaseid);
+insert into Venda 
+SELECT DISTINCT S.purchaseid
+                          ,S.sourceid
+                          ,S.eventdate
+                          ,P.pagename              
+           FROM ods.sales S
+           LEFT JOIN (SELECT pageid,pagename FROM ods.page) P 
+           ON P.pageid = S.salespageid
+           inner join ods.cancellations c
+            on c.purchaseid = S.purchaseid
+           WHERE CAST(C.cancellationdate AS DATE) >= CAST(current_date-INTERVAL '90 day' AS DATE)
+           --EXTRACT(YEAR FROM C.cancellationdate) = 2017
+           ;commit;
+
+/*8*/
+drop table if exists details;
+create temporary table details
+(
+  discountid integer
+, nome_da_opcao_texto varchar(24)
+, op_t_tulo_da_op_o varchar(124)
+)
+distkey(discountid)
+sortkey(discountid);           
+insert into details                
+   SELECT DISTINCT d.discountid,nome_da_opcao_texto,op_t_tulo_da_op_o
+   FROM reports.discountdetails d
+   inner join ods.cancellations c
+   on c.discountid = d.discountid
+   WHERE CAST(C.cancellationdate AS DATE) >= CAST(current_date-INTERVAL '90 day' AS DATE)
+   --EXTRACT(YEAR FROM C.cancellationdate) = 2017
+;commit;
+
+/*9*/
+drop table if exists commercialrevenue;
+create temporary table commercialrevenue
+( cuponid integer 
+, owner varchar(64)
+, team varchar(64)
+, region varchar(64)
+, coordinator varchar(64)
+, manager varchar(64)
+)
+distkey(cuponid)
+sortkey(cuponid); 
+
+insert into commercialrevenue 
+select distinct 
+    ca.cuponid,
+	dd.nome_propriet_rio_final "owner",
+	t.team,
+	ot.region,
+	t.coordinator,
+	t.manager
+FROM ods.cancellations ca
+left join reports.discountdetails dd
+	on dd.discountid = ca.discountid
+left join reports.ownererp oe
+	 on upper(oe.owner) = upper(dd.nome_propriet_rio_final)
+left join reports.ownerteam ot
+	on ot.ownererp = oe.ownererp
+left join reports.team t
+	on t.team = ot.team
+WHERE CAST(CA.cancellationdate AS DATE) >= CAST(current_date-INTERVAL '90 day' AS DATE)
+--EXTRACT(YEAR FROM CA.cancellationdate) = 2017
+;commit;
+
+/*10*/
+drop table if exists NEMO;
+create temporary table NEMO
+( purchaseid integer
+ ,emailaddress varchar(56)
+ ,osticketid float
+ ,owner varchar(24)
+ ,reason varchar(100)
+ ,subreason varchar(64)
+)
+distkey(purchaseid)
+sortkey(purchaseid);           
+insert into NEMO 
+SELECT 
+      purchaseid 
+     ,emailaddress
+     ,osticketid
+     ,owner
+     ,reason
+     ,subreason
+FROM(
+     SELECT
+           rr.purchaseid 
+          ,ua.emailaddress
+          ,CAST(osticketid AS float) osticketid
+          ,ro.name as owner
+          ,replace(re.name, '"', '') as reason
+          ,replace(rse.name, '"', '') as subreason
+          ,RANK() OVER 
+                      (PARTITION BY rr.purchaseid ORDER BY r.requestid
+                                                       ,ua.emailaddress
+                                                       ,requestdate
+                                                       ,lastupdate
+                                                       ,osticketid
+                                                       ,ro.name
+                                                       ,re.name
+                                                       ,rse.name
+                       ) AS Rank
+     FROM nemo.request r
+     LEFT JOIN nemo.requestrefund rr
+     	ON rr.requestid = r.requestid		
+     LEFT JOIN nemo.requestreason re
+        ON re.requestreasonid = rr.requestreasonid
+     INNER JOIN ods.cancellations c
+        ON c.purchaseid = rr.purchaseid
+     LEFT JOIN nemo.requestowner ro
+        ON ro.requestownerid = rr.requestownerid
+     LEFT JOIN nemo.requestsubreason rse
+        ON rse.requestsubreasonid = rr.requestsubreasonid
+        AND rse.requestreasonid = rr.requestreasonid
+     LEFT JOIN nemo.requesttype rt
+        ON rt.requesttypeid = r.requesttypeid
+     LEFT JOIN ods.useraccount ua
+        ON ua.useraccountid = r.requestuseraccountid
+     WHERE 1 = 1
+     AND CAST(C.cancellationdate AS DATE) >= CAST(current_date-INTERVAL '90 day' AS DATE)
+     --AND EXTRACT(YEAR FROM C.cancellationdate) = 2017
+     --AND rt.name IN ('"Cancelamento de cupom via APP"','"Solicitação de crédito de insatisfação"','"Cancelamento de cupom"','"Disputa de cupons"')
+     )
+WHERE rank = 1
+;commit;
+
+/*11*/
+DELETE FROM reports.MasterCancelamento
+WHERE CAST(datacancelamento AS DATE) >= CAST(current_date-INTERVAL '90 day' AS DATE);
+
+
+/*12*/
+INSERT INTO reports.MasterCancelamento
+SELECT DISTINCT
+      cuponID 
+     ,useraccountid 
+     ,code
+     ,ISNULL(Estado_publicacao,'NI') Estado_publicacao 
+     ,Mes
+     ,Ano
+     ,datacriacaoCupom
+     ,datainicioCompra
+     ,datacancelamento
+     ,DataInicioOferta
+     ,DataFimOferta
+     ,DatadeUso
+     ,DataDisputa
+     ,DataExpiracao
+     ,Eventdate     --------
+     ,MontanteCanceladoTotal
+     ,case
+			            when AffectBilling = 1 then ComissaoPUcancelada
+			            when AffectBilling = 0 and  IsCancelledCouponPaidByPU = 0 then ComissaoPUcancelada
+			            ELSE MontanteCanceladoTotal
+			            end MontanteCanceladoFinal
+     ,ParteParceiroCancelada
+     ,ComissaoPUcancelada
+     ,nossacomissao
+     ,Oferta
+     ,CASE WHEN AffectBilling = 1 THEN 'Pre'
+           WHEN AffectBilling = 0 THEN 'Pos' END AS Faturamento
+     ,Categoria AS Categoria_Antiga
+     ,UseAgora
+     ,TipoCancelamento
+     ,Motivo
+     ,Parceiro
+     ,Cidade
+     ,Tipo_Site
+     ,Categoria_Site
+     ,SubCategoria_Site
+     ,executivo_vendas
+     ,Opcao_Compra
+     ,Titulo_Opcao_Compra
+     ,fim.team
+     ,RegiaoComercial
+     ,fim.coordinator 
+     ,manager
+     ,OrigemCompra
+     ,Tickets
+     ,fim.email AS Atendente
+     ,purchaseremailaddress AS EmailComprador         
+     ,RT.coordinator AS CoordenadorREC
+     ,OrigemCancelamento
+     ,pagename
+     ,Responsavel_Nemo
+     ,Submotivo
+FROM(
+SELECT 
+      CA.cuponID 
+     ,CA.useraccountid 
+     ,CA.code
+     ,MDL.account_state AS Estado_publicacao 
+     ,EXTRACT(Month FROM CA.cancellationdate) AS Mes
+     ,EXTRACT(YEAR FROM CA.cancellationdate) AS Ano
+     ,CAST(CA.cuponcreationdate AS DATE) AS datacriacaoCupom
+     ,CAST(CA.purchaseinitiated AS DATE) AS datainicioCompra
+     ,CAST(CA.cancellationdate AS DATE) AS datacancelamento
+     ,CAST(MDL.publishing_date AS DATE) AS DataInicioOferta 
+     ,CAST(MDL.expiration_date AS DATE) AS DataFimOferta
+     ,CAST(SA.eventdate AS DATE) AS Eventdate
+     ,CAST(CA.fufillmentdate AS DATE) AS DatadeUso
+     ,CAST(CA.disputedate AS DATE) AS DataDisputa
+     ,CAST(MDL.coupon_coupon_end_date AS DATE) AS DataExpiracao  
+     ,CAST(CA.cancelledamount AS DECIMAL(10,2)) AS MontanteCanceladoTotal
+     ,CAST(CA.cancelledamounttopartner AS DECIMAL(10,2)) AS ParteParceiroCancelada
+     ,CAST(CA.cancelledpucommission AS DECIMAL(10,2)) AS ComissaoPUcancelada
+     ,CAST(CA.ourcomission AS DECIMAL(10,2)) AS nossacomissao
+     ,MDL.title AS Oferta 
+     ,CA.affectbilling
+     ,CA.iscancelledcouponpaidbypu
+     ,MDL.category AS Categoria -- ods.mng_deals_Latest
+     ,case when cupom_impresso ='Apresentar cupom no aplicativo oficial do Peixe Urbano ou impresso (Recomendado)' and agendamento = '' then 1
+           when cupom_impresso ='Apresentar cupom no aplicativo oficial do Peixe Urbano ou impresso (Recomendado)' and agendamento ='Não precisa agendar' then 1
+           when cupom_impresso ='Apresentar cupom no aplicativo oficial do Peixe Urbano ou impresso (Recomendado)' and agendamento ='Site do Parceiro' then 1
+           when cupom_impresso ='Basta informar o código do cupom da forma que preferir' and agendamento ='' then 1
+           when cupom_impresso ='Basta informar o código do cupom da forma que preferir' and agendamento ='Não precisa agendar' then 1
+           when cupom_impresso ='Basta informar o código do cupom da forma que preferir' and agendamento ='Site do Parceiro' then 1
+           when cupom_impresso ='Apresentar Cupom no App ou Impresso (Recomendado)' and agendamento ='' then 1
+           when cupom_impresso ='Apresentar Cupom no App ou Impresso (Recomendado)' and agendamento ='Não precisa agendar' then 1
+           when cupom_impresso ='Apresentar Cupom no App ou Impresso (Recomendado)'and agendamento ='Site do Parceiro' then 1
+           else 0
+           end UseAgora
+     ,ISNULL(TM.TipoCancelamento,'Indeterminado') TipoCancelamento
+     ,COALESCE(CAST(N.reason as varchar(132)),CAST(TM.Motivo as varchar(132)),CAST('Indeterminado' as varchar(132))) Motivo
+     ,MDL.account_name AS Parceiro
+     ,MDL.account_city AS Cidade 
+     ,MDL.phoenix_type AS Tipo_Site 
+     ,MDL.phoenix_category AS Categoria_Site 
+     ,MDL.tag_description AS SubCategoria_Site 
+     ,DE.owner AS executivo_vendas
+     ,DT.nome_da_opcao_texto AS Opcao_Compra
+     ,DT.op_t_tulo_da_op_o AS Titulo_Opcao_Compra
+     ,DE.team
+     ,DE.region AS RegiaoComercial                                                 
+     ,DE.coordinator 
+     ,DE.manager
+     ,CASE WHEN SA.sourceid = 1 then 'Web'
+           WHEN SA.sourceid = 2 then 'Mobile'
+           ELSE 'Outros' END AS OrigemCompra
+     ,COALESCE(cast(N.osticketid as float),cast(TK.ticketid as float)) as Tickets
+     ,COALESCE(CAST(N.emailaddress as varchar(56)),CAST(RF.emailMGR as varchar(56)),CAST(TK.email as varchar(56))) AS email
+     ,CA.purchaseremailaddress                                                                                                                                          
+     ,CASE WHEN CA.CuponIDD IS NOT NULL THEN 'Mobile' ELSE 'Normal' END AS OrigemCancelamento
+     ,SA.pagename
+     ,N.owner AS Responsavel_Nemo
+     ,N.subreason AS Submotivo
+FROM cancels CA
+LEFT JOIN tipomotivo TM
+	ON TM.cuponID = CA.cuponID
+LEFT JOIN mdl MDL
+	ON MDL.unifieddiscountid = CA.unifieddiscountid
+LEFT JOIN details DT
+	ON DT.discountid = CA.discountid
+left join agendamento ct
+	on ct.c_digo_oferta_num_rico = CA.idoferta
+left join commercialrevenue DE
+	on DE.cuponid = CA.cuponid
+LEFT JOIN Venda SA
+	ON SA.purchaseid = CA.purchaseid
+LEFT JOIN tickets TK
+	ON TK.cuponid = CA.cuponid
+LEFT JOIN reembolso RF 
+	ON RF.purchaseid = CA.purchaseid
+LEFT JOIN NEMO N 
+	ON N.purchaseid = CA.purchaseid
+)Fim
+LEFT JOIN reports.recteam RT
+    ON RT.email = fim.email;
+commit;
+
+

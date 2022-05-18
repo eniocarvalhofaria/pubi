@@ -1,0 +1,149 @@
+﻿   drop table if exists  #AniversaryReport
+;
+   
+    select 
+    	o.op_numerico
+    ,	o.op_name 
+    ,	ofDescription 
+    ,	coalesce(mbo.description, '') opDescription
+    ,	mbo.available_units AvailableUnits
+    ,	mbo.sold_out SoldOut
+    ,	grossSales
+    ,	qtySoldcoupons
+    ,	qtytransactions
+    into #AniversaryReport
+    from
+    (   
+    
+   	select 
+   		cast(substring(op.name,4,10) as int) op_numerico 
+   	,	op.name op_name 
+   	,	coalesce(ofe.sugest_o_de_manchete) ofDescription
+   	from salesforce.ctofertas ofe
+   	inner join salesforce.ctop_es_de_compra op 
+   	on op.id_da_oferta = ofe.id
+   	where 
+   		(
+   			Of_Campanha_de_Marketing ilike '%Anivers�rio PU 2017%'
+   		or  OP_Campanha_de_Marketing ilike '%Anivers�rio PU 2017%'
+   		)
+   	and of_fase = 'Oferta Dispon�vel'
+   	and op_status_da_op_o = 'Ativa'
+   	) o 
+   	left join 
+   	(
+    select 
+ 		c_digo_opcao_n_merico op_numerico
+  	,	sum(coalesce(grossSales,0)) grossSales
+  	,	sum(coalesce(dr.qtycoupons,0)) qtySoldcoupons
+  	,	sum(coalesce(qtytransactions,0)) qtytransactions
+    from reports.discountdetails d 
+    left join reports.discountrevenue dr
+    on d.discountId = dr.discountid 
+    group by 1
+    ) r
+   	on r.op_numerico = o.op_numerico 
+   	left join ods.mng_deals_latest_buying_options mbo 
+   	on mbo.idopcaodecompra = o.op_numerico
+; 
+
+truncate table reports.AniversaryReport
+;
+
+insert into reports.AniversaryReport
+select * from #AniversaryReport
+;
+
+
+
+
+
+  drop table if exists  #AniversaryReportSource
+;
+   
+    select 
+    	o.op_numerico
+    ,	o.op_name 
+    ,	ofDescription 
+    ,	coalesce(mbo.description, '') opDescription
+    ,	mk.mktsourcename
+    ,	grossSales
+    ,	qtySoldcoupons
+    ,	qtytransactions
+    into #AniversaryReportSource
+    from
+    (   
+    
+   	select 
+   		cast(substring(op.name,4,10) as int) op_numerico 
+   	,	op.name op_name 
+   	,	coalesce(ofe.sugest_o_de_manchete) ofDescription
+   	from salesforce.ctofertas ofe
+   	inner join salesforce.ctop_es_de_compra op 
+   	on op.id_da_oferta = ofe.id
+   	where 
+   		(
+   			Of_Campanha_de_Marketing ilike '%Anivers�rio PU 2017%'
+   		or  OP_Campanha_de_Marketing ilike '%Anivers�rio PU 2017%'
+   		)
+   	and of_fase = 'Oferta Dispon�vel'
+   	and op_status_da_op_o = 'Ativa'
+   	) o 
+   	left join 
+   	(
+    select 
+   	   	case 
+			when pur.landingpageurl ilike '%utm_source=googleshopping%' then 13
+			when pur.landingpageurl ilike '%source=mcmagazine%' then 14
+			when pur.landingpageurl ilike '%gclid%' then 7
+			when pur.landingpageurl ilike '%utm_source=google%' AND pur.landingpageurl ilike '%utm_medium=cpc%' then 7
+			when pur.landingpageurl ilike '%utm_source=facebookads%' and pur.landingpageurl ilike '%utm_campaign=%geolocation%' then 15
+			when pur.landingpageurl ilike '%utm_source=facebookads%' then 6
+			when pur.landingpageurl ilike '%utm_source=criteo%' AND pur.landingpageurl ilike '%utm_medium=rmkt%' then 4
+			when pur.landingpageurl ilike '%utm_source=saveme%' then 10
+			when pur.landingpageurl ilike '%utm_source=lomadee%' and pur.landingpageurl ilike '%utm_campaign=22463985%' then 10
+			when pur.landingpageurl ilike '%utm_source=lomadee%' and pur.landingpageurl ilike '%utm_campaign=22550778%' then 16
+			when pur.landingpageurl ilike '%utm_source=buscape%' then 3
+			when pur.landingpageurl ilike '%utm_source=bing%' AND pur.landingpageurl ilike '%utm_medium=cpc%' then 2
+			when pur.landingpageurl ilike '%utm_source=soclminer%' then 11
+			when pur.landingpageurl ilike '%utm_source=microsoft%' then 12
+			when pur.landingpageurl ilike '%utm_medium=afiliado%' then 1
+			when pur.landingpageurl ilike '%utm_medium=email%' then 5
+			when pur.landingpageurl ilike '%utm_source=share-to-win%' then 8
+			when pur.landingpageurl ilike '%utm_source=banner%' then 8
+			when pur.landingpageurl ilike '%utm_source=thankyoupage%' then 8
+			when pur.landingpageurl ilike '%utm_source=fortaleza%' then 17
+			when pur.landingpageurl ilike '%utm_source=valejunto%' then 18
+			when pur.landingpageurl ilike '%utm_source=superaremidia%' then 19
+			when pur.landingpageurl ilike '%utm_source=facebookOrg%' then 20
+			when pur.landingpageurl ilike '%utm_source=push%' then 21
+			when pur.landingpageurl ilike '%utm_medium%' then 9
+			else  8
+		end	mktSourceId
+ 	,	c_digo_opcao_n_merico op_numerico
+  	,	sum(coalesce(grossSales,0)) grossSales
+  	,	sum(coalesce(pur.qtycoupons,0)) qtySoldcoupons
+  	,	sum(coalesce(qtytransactions,0)) qtytransactions
+    from reports.discountdetails d 
+    left join ods.Sales pur
+    on d.discountId = pur.discountid 
+    group by 1,2
+    ) r
+    on r.op_numerico = o.op_numerico 
+    left join ods.mng_deals_latest_buying_options mbo 
+   	on mbo.idopcaodecompra = o.op_numerico
+    left join reports.mktsource mk 
+    on mk.mktsourceid = r.mktSourceId
+    
+    
+;
+truncate table reports.AniversaryReportSource
+;
+
+insert into reports.AniversaryReportSource
+select * from #AniversaryReportSource
+
+;commit
+
+
+

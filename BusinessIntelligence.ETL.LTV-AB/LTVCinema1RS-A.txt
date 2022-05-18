@@ -1,0 +1,20 @@
+﻿		sale.UnifiedDiscountID in 
+		(
+		select
+			UnifiedDiscountId
+		from ods.UnifiedDiscount
+		where ContractId in
+			(
+			select  distinct
+					ContractId 
+			from reports.Contract c
+			left join reports.Offer o
+			on c.SalesForceContractId = o.SalesForceContractId
+			where
+			c.Subcategory_Site = 'Cinema'
+			or c.Subcategory = 'Cinema'
+			or o.Subcategory = 'Cinema'
+			)
+		)
+		and cast(sale.eventDate as date) >= '2015-12-04'
+		and sale.promocodes in (10.9,7,11.9)

@@ -1,0 +1,276 @@
+
+drop table if exists #tempDiscount
+;
+create table #tempDiscount
+(
+discountid int ,
+maindiscountid int,
+unifieddiscountid int,
+discountedvalue decimal(18,2),
+amounttopartner decimal(18,4),
+ourcommission decimal(18,17)
+)
+distkey (discountid)
+sortkey (discountid,maindiscountid)
+
+;
+insert into #tempDiscount
+select 
+	discountid
+,	maindiscountid
+,	unifieddiscountid
+,	discountedvalue
+,	discountedvalue * (1- ourcommission) amounttopartner
+,	ourcommission
+from ods.discount
+where unifieddiscountid in (select distinct unifieddiscountid from ods.udiscountpartnerfinalization)
+and discountedvalue > 0
+and ourcommission between 0 and 1
+
+;
+
+drop table if exists  #udpfd 
+;
+select 
+	cast(tmstmp as date) noshowdate
+,	coalesce(d.maindiscountid,a.discountid) discountid
+,	unifieddiscountid
+,	max(amountnoshow) amountnoshow
+into #udpfd 
+from ods.udiscountpartnerfinalizationdiscount a
+left join 
+(select discountid,maindiscountid from #tempDiscount where maindiscountid is not null and not(maindiscountid = discountid) ) d 
+on 
+a.discountid = d.discountid
+group by 1,2,3
+;
+
+
+drop table if exists #tempcupon
+;
+select distinct 
+	cuponid
+,	purchaseid
+,	d.discountedvalue
+,	d.amounttopartner
+,	coalesce(d.maindiscountid,d.discountid) discountid
+,	d.unifieddiscountid
+into #tempcupon
+from ods.cupon c
+left join #tempDiscount d 
+on c.discountid = d.discountid
+where fufillmentdate is null 
+and couponstatusid  = 1  
+;
+
+drop table if exists #couponsNoshow
+;
+create table #couponsNoshow
+(
+cuponid int ,
+purchaseid int,
+discountid int,
+discountidnoshow int,
+unifieddiscountid int,
+discountedvalue decimal(18,2),
+amounttopartner decimal(18,4),
+noshowdate date,
+noshowvalue decimal(18,4),
+noshowmanagerialvalue decimal(18,4),
+stepprocessing int
+)
+distkey (cuponid)
+sortkey (cuponid)
+;
+
+insert into #couponsNoshow
+select 
+	c.cuponid
+,	c.purchaseid 
+,	c.discountid
+,	fd.discountid
+,	fd.unifieddiscountid
+,	c.discountedvalue
+,	c.amounttopartner
+,	fd.noshowdate
+,	cast(fd.amountnoshow as decimal(18,4)) / sum(c.discountedvalue) over (partition by fd.discountid ,fd.noshowdate) * c.discountedvalue
+,	cast(fd.amountnoshow as decimal(18,4)) / sum(c.discountedvalue) over (partition by fd.discountid ,fd.noshowdate) * c.amounttopartner
+,	1
+from #tempcupon c
+inner join #udpfd fd 
+on c.discountid = fd.discountid
+where
+fd.amountnoshow > 0
+;
+
+/*
+insert into #couponsNoshow
+select 
+	c.cuponid
+,	c.purchaseid 
+,	c.discountid
+,	fd.discountid
+,	td.unifieddiscountid
+,	c.discountedvalue
+,	c.amounttopartner
+,	fd.noshowdate
+,	cast(fd.amountnoshow as decimal(18,4)) / sum(c.discountedvalue) over (partition by fd.discountid ,cast(fd.noshowdate as date)) * c.discountedvalue
+,	cast(fd.amountnoshow as decimal(18,4)) / sum(c.discountedvalue) over (partition by fd.discountid ,cast(fd.noshowdate as date)) * c.amounttopartner
+,	2
+from #tempcupon c
+inner join #tempdiscount td 
+on c.discountid = td.discountid
+inner join 
+(
+	select 
+		a.discountid
+	,	cast(tmstmp as date) noshowdate		
+	,	a.amountnoshow - coalesce(noshowvalue,0) amountnoshow
+	from ods.UDiscountPartnerFinalizationDiscount a 
+	left join
+	(
+	select 
+		discountid
+	,	sum(noshowvalue) noshowvalue
+	,	sum(noshowmanagerialvalue) noshowmanagerialvalue
+	from #couponsNoshow
+	group by 1
+	) x 
+	on a.discountid = x.discountid
+	where a.amountnoshow > 0
+)fd 
+on td.maindiscountid = fd.discountid
+left join  #couponsNoshow cns 
+on cns.cuponid = c.cuponid
+where
+	cns.cuponid is null
+
+
+;
+*/
+insert into #couponsNoshow
+
+select distinct
+	c.cuponid
+,	c.purchaseid 
+,	c.discountid
+,	0
+,	c.unifieddiscountid
+,	c.discountedvalue
+,	c.amounttopartner
+,	ns.noshowdate  noshowdate
+,	(cast(ns.amountnoshow as decimal(18,4)) / sum(c.discountedvalue) over (partition by ns.unifieddiscountid )) * c.discountedvalue
+,	(cast(ns.amountnoshow as decimal(18,4)) / sum(c.discountedvalue) over (partition by ns.unifieddiscountid )) * c.amounttopartner
+,	3
+from #tempcupon c
+inner join  
+	(
+		select 
+			unifieddiscountid
+		,	min(cast(tmstmp as date)) noshowdate
+		,	sum(amountnoshow) amountnoshow 
+		from ods.udiscountpartnerfinalization
+		where amountnoshow > 0
+		group by 1
+	) ns 
+on ns.unifieddiscountid = c.unifieddiscountid
+left join (select distinct unifieddiscountid from #udpfd ) fd2
+on c.unifieddiscountid = fd2.unifieddiscountid
+left join  #couponsNoshow cns 
+on cns.cuponid = c.cuponid
+where cns.cuponid is null
+and  fd2.unifieddiscountid is null
+
+;
+truncate table reports.couponsNoshow
+;
+insert into reports.couponsNoshow
+select 
+	cuponid
+,	purchaseid 
+,	unifieddiscountid
+,	discountedvalue
+,	amounttopartner
+,	noshowdate
+,	noshowvalue
+,	noshowmanagerialvalue
+from #couponsNoshow
+;
+
+truncate table reports.noshowNotIdentified
+;
+insert into reports.noshowNotIdentified
+select 
+	a.unifieddiscountid
+,	a.noshowdate
+,	a.discountid
+,	sum(a.noshowvalue) noshowvalue 
+,	sum(a.noshowmanagerialvalue)  noshowmanagerialvalue 
+
+from 
+(
+select 
+	udd.unifieddiscountid
+,	udd.discountid
+,	udd.noshowdate
+,	sum(amountnoshow) noshowvalue 
+,	sum(amountnoshow * (1- d.ourcommission)) noshowmanagerialvalue
+from #udpfd udd
+inner join #tempdiscount d 
+on udd.discountid = d.discountid
+where amountnoshow > 0
+group by 1,2,3
+
+) a
+left join 
+(
+select 
+	discountid
+,	noshowdate
+,	sum(noshowvalue) noshowvalue
+,	sum(noshowmanagerialvalue) noshowmanagerialvalue
+from #couponsnoshow group by 1,2
+) b
+on a.discountid = b.discountid
+and a.noshowdate = b.noshowdate
+where b.discountid is null
+
+group by 1,2,3
+;
+
+
+insert into reports.noshowNotIdentified
+select 
+	a.unifieddiscountid
+,	a.noshowdate
+,	0
+,	a.noshowvalue  
+,	a.noshowmanagerialvalue   
+
+from 
+(
+select 
+	udd.unifieddiscountid
+,	cast(tmstmp as date) noshowdate
+,	sum(amountnoshow) noshowvalue 
+,	sum(amountnoshow * (1- d.ourcommission)) noshowmanagerialvalue
+from ods.udiscountpartnerfinalization udd
+inner join (select unifieddiscountid,avg(ourcommission) ourcommission from #tempdiscount group by 1) d 
+on udd.unifieddiscountid = d.unifieddiscountid
+left join (select distinct unifieddiscountid from ods.udiscountpartnerfinalizationdiscount) x
+on udd.unifieddiscountid = x.unifieddiscountid
+where amountnoshow > 0
+and x.unifieddiscountid is null
+group by 1,2
+
+) a
+left join 
+(
+	select distinct
+		unifieddiscountid
+	from #couponsnoshow 
+) b
+on a.unifieddiscountid = b.unifieddiscountid
+where b.unifieddiscountid is null
+;
+

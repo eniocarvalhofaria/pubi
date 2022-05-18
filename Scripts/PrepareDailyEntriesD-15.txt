@@ -1,0 +1,506 @@
+drop table if exists temp_aux_dailyentries;
+create temporary table temp_aux_dailyentries(
+unifieddiscountid    	integer,
+salespageid     		integer,
+eventdate      			date,
+channelid				int4,
+grosssales      		decimal(10,2),
+grosssalespucommission  decimal(10,2),
+cancelamento_pre_pu		decimal(10,2),
+cancelamento_pos_pu		decimal(10,2),
+noshow					decimal(10,2),
+rol						decimal(10,2),
+sold_cupons     		integer,
+venda_mobile    		decimal(10,2),
+lucro_bruto				decimal(10,2),
+taxa_parcelamento		decimal(10,2),
+taxa_adquirente			decimal(10,2),
+taxa_carrinho			decimal(10,2),
+antifraude				decimal(10,2),
+promocodes				decimal(10,2),
+custo_antecipacao		decimal(10,2),
+cancelamento_promocodes decimal(10,2),          
+venda_web				decimal(10,2),
+venda_responsivo		decimal(10,2),
+venda_email      		decimal(10,2),
+gmv      				decimal(10,2)
+)
+diststyle key
+distkey (unifieddiscountid)
+sortkey (unifieddiscountid);
+
+drop table if exists #dailyentries_datas;
+select max(dateforsale) inidateforsale ,max(dateforsale) fimdateforsale 
+into #dailyentries_datas
+from reports.dailyentries;
+
+drop table if exists #temp_aux_discountrevenue;
+select distinct dr.unifieddiscountid,dr.salespageid, dr.eventdate::date, dr.channelid into #temp_aux_discountrevenue
+from reports.discountrevenue dr
+--where dr.eventdate::date between (current_date - Interval '15 day')::date and (getdate()-1)::date;
+where dr.eventdate::date between (select min(inidateforsale) inidateforsale from #dailyentries_datas)  and (getdate()-1)::date;
+
+insert into temp_aux_dailyentries(
+			 unifieddiscountid
+           , salespageid
+           , eventdate
+           , channelid
+           , grosssales
+           , grosssalespucommission
+           , cancelamento_pre_pu
+           , cancelamento_pos_pu
+           , noshow
+           , ROL
+           , sold_cupons
+           , venda_mobile
+           , lucro_bruto
+           , taxa_parcelamento
+           , taxa_adquirente
+           , taxa_carrinho
+           , antifraude
+           , promocodes
+           , custo_antecipacao
+           , cancelamento_promocodes           
+           ,  venda_web
+           , venda_responsivo
+           , venda_email
+           ,gmv
+)
+select  unifieddiscountid
+		,salespageid
+		,eventdate
+		,channelid
+		,sum(grosssales) grosssales
+		,sum(grosssalespucommission) grosssalespucommission
+		,sum(cancelamento_pre_pu) cancelamento_pre_pu
+		,sum(cancelamento_pos_pu) cancelamento_pos_pu
+		,sum(noshow) noshow
+		,sum(ROL) ROL
+		,sum(sold_cupons) sold_cupons
+		,sum(venda_mobile) venda_mobile 
+		---
+		,sum(lucro_bruto) lucro_bruto
+        ,sum(taxa_parcelamento) taxa_parcelamento
+        ,sum(taxa_adquirente) taxa_adquirente
+        ,sum(taxa_carrinho) taxa_carrinho
+        ,sum(antifraude) antifraude
+        ,sum(promocodes) promocodes
+        ,sum(custo_antecipacao) custo_antecipacao
+        ,sum(cancelamento_promocodes) cancelamento_promocodes           
+        ,sum(venda_web) venda_web
+        ,sum(venda_responsivo) venda_responsivo
+        ,sum(venda_email) venda_email  
+        ,sum(gmv) gmv
+    from (
+select dr.unifieddiscountid
+           , salespageid
+           , eventdate
+           , dr.channelid
+           , sum(grosssales) grosssales
+           , sum(grosssalespucommission) grosssalespucommission
+           , sum(dr.cancelledprebillingpu) cancelamento_pre_pu
+           , sum(dr.cancelledposbilling) cancelamento_pos_pu
+           , sum(dr.noshow) noshow
+           , sum(dr.operationalnetrevenue) ROL
+           , sum(qtycoupons) sold_cupons
+           , sum(case when sourceid = 2 then grosssales else 0 end) venda_mobile
+           ---
+           , sum(dr.grossprofit) lucro_bruto
+           , sum(dr.financecharge) taxa_parcelamento
+           , sum(dr.aquirerfee) taxa_adquirente
+           , sum(dr.extrafees) taxa_carrinho
+           , sum(dr.antifraudfee) antifraude
+           , sum(dr.promocodes) promocodes
+           , sum(dr.anticipationcost) custo_antecipacao
+           , sum(dr.cancellationpromocodes) cancelamento_promocodes           
+           , sum(case when sourceid = 1 then grosssales else 0 end) venda_web
+           , sum(case when sourceid = 3 then grosssales else 0 end) venda_responsivo
+           , sum(case when mktsourceid = 5 then grosssales else 0 end) venda_email
+           , sum(dr.gmv) gmv
+      FROM reports.vw_discountrevenue dr 
+      where eventdate::date between (select min(inidateforsale) inidateforsale from #dailyentries_datas)  and (getdate()-1)::date--::date between (current_date - Interval '15 day')::date and (getdate()-1)::date
+      group by dr.unifieddiscountid
+             , eventdate
+             , dr.salespageid	
+             , dr.channelid
+      union all
+      select distinct uds.unifieddiscountid
+                    , uds.pageid salespageid
+                    , uds.dateforsale eventdate
+                    , dr.channelid
+                    , 0 grosssales
+                    , 0 grosssalespucommission
+                    , 0 cancelamento_pre_pu
+                    , 0 cancelamento_pos_pu
+                    , 0 noshow
+                    , 0 as ROL
+                    , 0 as sold_cupons
+                    , 0 as venda_mobile
+                    ---
+                    , 0 lucro_bruto
+		            , 0 taxa_parcelamento
+		            , 0 taxa_adquirente
+		            , 0 taxa_carrinho
+		            , 0 antifraude
+		            , 0 promocodes
+		            , 0 custo_antecipacao
+		            , 0 cancelamento_promocodes           
+		            , 0 venda_web
+		            , 0 venda_responsivo
+		            , 0 venda_email
+		            , 0 gmv
+			  from reports.UnifiedDiscountScheduling uds
+			  	left join #temp_aux_discountrevenue dr on dr.unifieddiscountid = uds.unifieddiscountid 
+			  											and dr.salespageid = uds.pageid
+			  											and dr.eventdate::date = uds.dateforsale::date
+			where uds.dateforsale::date between (select min(inidateforsale) inidateforsale from #dailyentries_datas)  and (getdate()-1)::date--::date between (current_date - Interval '15 day')::date and (getdate()-1)::date
+	) as a
+	group by  unifieddiscountid, salespageid, eventdate, channelid;
+	
+drop table if exists #temp_aux_discountrevenue;
+
+drop table if exists temp_aux_dailyentries_unifieddiscountid;
+CREATE temporary TABLE temp_aux_dailyentries_unifieddiscountid(
+unifieddiscountid integer
+)
+diststyle all
+sortkey(unifieddiscountid);
+insert into temp_aux_dailyentries_unifieddiscountid(unifieddiscountid)
+select distinct t.unifieddiscountid from temp_aux_dailyentries  t;
+
+
+drop table if exists temp_aux_dailyentries_region;
+CREATE temporary TABLE temp_aux_dailyentries_region(
+deal_id varchar(100),
+legacydata_unified_discount_id integer,
+region varchar(400)
+)
+diststyle all
+sortkey(deal_id);
+
+insert into temp_aux_dailyentries_region
+select dlt.deal_id, dl.legacydata_unified_discount_id,
+			listagg(tag_description,', ')
+			within group (order by tag_description) as region
+			from ods.mng_deals_latest_tags dlt
+			LEFT JOIN ods.mng_deals_latest dl	on dl.deal_id = dlt.deal_id
+			inner join temp_aux_dailyentries_unifieddiscountid t on t.unifieddiscountid = dl.legacydata_unified_discount_id
+			where tag_name = 'regions'
+			group by dlt.deal_id, dl.legacydata_unified_discount_id;
+--
+drop table if exists #temp_aux_dailyentries_proprietario;
+select distinct 
+                    d.unifieddiscountid
+                   ,u.idoferta
+                   ,dd.nome_propriet_rio_final as proprietario_oferta
+                   ,t.team
+                   ,t.coordinator
+                   ,t.manager
+                   ,DENSE_RANK() OVER 
+                                     (
+                                      PARTITION BY d.unifieddiscountid ORDER BY u.idoferta,
+                                                                                dd.c_digo_opcao_n_merico DESC,
+                                                                                oe.ownererp,
+                                                                                t.team,
+                                                                                t.coordinator,
+                                                                                t.manager
+                                      ) AS RANK 
+     into temp #temp_aux_dailyentries_proprietario 
+     FROM reports.discountdetails dd
+     inner join ods.discount d
+          on d.discountid = dd.discountid
+     left join ods.unifieddiscount u
+          on u.unifieddiscountid = d.unifieddiscountid 
+     left join reports.ownererp oe
+     	 on upper(oe.owner) = upper(dd.nome_propriet_rio_final)
+     left join reports.ownerteam ot
+     	on upper(ot.ownererp) = upper(oe.ownererp)
+     left join reports.team t
+     	on upper(t.team) = upper(ot.team)
+     inner join temp_aux_dailyentries_unifieddiscountid tt on d.unifieddiscountid = tt.unifieddiscountid
+ 	 where ((dd.nome_propriet_rio_final is not null and dd.nome_propriet_rio_final <> '')
+ 	 		or (t.team is not null and t.team <> '')
+ 	 		or (t.coordinator is not null and t.coordinator <> '')
+ 	 		or (t.manager is not null and t.manager <> '')
+ 	 		);
+     
+drop table if exists temp_aux_dailyentries_proprietario_final;
+create temporary table temp_aux_dailyentries_proprietario_final
+( unifieddiscountid integer
+, idoferta integer 
+, proprietario_oferta varchar(64)
+, team varchar(64)
+, coordinator varchar(64)
+, manager varchar(64)
+)
+distkey(unifieddiscountid)
+sortkey(unifieddiscountid); 
+
+insert into temp_aux_dailyentries_proprietario_final(unifieddiscountid
+     ,idoferta
+     ,proprietario_oferta
+     ,team
+     ,coordinator
+     ,manager)
+select
+      unifieddiscountid
+     ,idoferta
+     ,proprietario_oferta
+     ,team
+     ,coordinator
+     ,manager
+from #temp_aux_dailyentries_proprietario
+where rank = 1;
+
+drop table if exists #temp_aux_dailyentries_proprietario;
+
+drop table if exists temp_aux_dailyentries_dl;
+CREATE temporary TABLE temp_aux_dailyentries_dl (
+	legacydata_unified_discount_id int4,
+	payment_terms varchar(100),
+	coupon_coupon_end_date date,
+	contract_number varchar(15),
+	account_neighborhood varchar(101),
+	deal_id varchar(50),
+	account_account_id varchar(70),
+	link varchar(500), 
+	idoferta int4,
+	title varchar(500),
+	account_name varchar(102),
+	category varchar(103),
+	phoenix_type varchar(50),
+	phoenix_category varchar(50),
+	tag_description varchar(MAX),
+	publishing_date date,
+	expiration_date date,
+	public bool,
+	category_site varchar(255),
+	subcategory_site varchar(255),
+	region varchar(max)
+)
+diststyle all
+sortkey(legacydata_unified_discount_id);
+
+insert into temp_aux_dailyentries_dl
+SELECT 
+  legacydata_unified_discount_id
+, payment_terms
+, coupon_coupon_end_date
+, contract_number
+, account_neighborhood
+, deal_id
+, account_account_id
+, canonical_url
+, idoferta
+, title
+, account_name
+, category
+, phoenix_type
+, phoenix_category
+, tag_description
+, publishing_date
+, expiration_date
+, public
+, category_site
+, subcategory_site
+, region
+FROM(
+select distinct legacydata_unified_discount_id
+, payment_terms
+, coupon_coupon_end_date
+, contract_number
+, account_neighborhood
+, a.deal_id
+, account_account_id
+, a.canonical_url
+, a.idoferta
+, a.title
+, a.account_name
+, a.category
+, a.phoenix_type
+, a.phoenix_category
+, phoenix_type AS tag_description
+, publishing_date
+, expiration_date
+, cast(public as bool) public
+, dltcat.tag_description category_site
+, dltsubcat.tag_description subcategory_site
+, dlregion.region
+, DENSE_RANK() OVER 
+                                          (
+                                           PARTITION BY legacydata_unified_discount_id ORDER BY expiration_date DESC
+                                                                                              , publishing_date DESC
+                                                                                              , payment_terms
+                                                                                              , coupon_coupon_end_date
+                                                                                              , contract_number
+                                                                                              , account_neighborhood
+                                                                                              , a.deal_id
+                                                                                              , account_account_id
+                                                                                              , a.idoferta
+                                                                                              , a.title
+                                                                                              , a.account_name
+                                                                                              , a.category
+                                                                                              , a.phoenix_type
+                                                                                              , a.phoenix_category
+                                                                                              , phoenix_type
+                                                                                              , public DESC
+                                           ) AS RANK 
+from ods.mng_deals_latest a
+inner join temp_aux_dailyentries_unifieddiscountid tt on a.legacydata_unified_discount_id = tt.unifieddiscountid
+left join (select deal_id, max(tag_description) tag_description from ods.mng_deals_latest_tags 
+where tag_name='categories' and tag_description is not null or tag_description <> '' group by deal_id) dltcat on dltcat.deal_id = a.deal_id
+left join (select deal_id, max(tag_description) tag_description from ods.mng_deals_latest_tags 
+where tag_name='subcategories' and tag_description is not null or tag_description <> '' group by deal_id) dltsubcat on dltsubcat.deal_id = a.deal_id
+left join(select deal_id, listagg(tag_description,', ') within group (order by tag_description) as region
+	from ods.mng_deals_latest_tags dlt
+	where tag_name = 'regions' and tag_description is not null or tag_description <> '' group by deal_id) dlregion on dlregion.deal_id = a.deal_id
+) where rank = 1;
+
+drop table if exists temp_aux_dailyentries_unifieddiscountid;
+
+delete 
+from reports.dailyentries
+where dateforsale::date between (select min(inidateforsale) inidateforsale from #dailyentries_datas) and (select min(fimdateforsale) inidateforsale from #dailyentries_datas);
+
+drop table if exists #dailyentries_datas;
+
+insert into reports.dailyentries(
+	contract_number,
+	pagename,
+	accountregion,
+	bairro,
+	dateforsale,
+	uid,
+	idoferta,
+	discountname,
+	link,
+	partnername,
+	category_name,
+	tipo_site,
+	categoria_site,
+	sub_categoria_site,
+	sub_sub_categoria,
+	condicao_pagamento,
+	discount_start,
+	discount_end,	
+	proprietario_oferta, 
+	team,
+	coordinator,
+	manager,
+	public,
+	grupo_economico,
+	campanha_marketing,
+	criador_do_planejamento,
+	fonte_de_pesquisa,
+	criador_planejamento_texto, 
+	Fonte_de_Pesquisa_Oferta,
+	Planner,
+	coordinators,
+	tipo_de_pagamento,
+	channelid,
+	expire_date,
+	grosssales,
+	grosssalespucommission,
+	cancelamento_pre_pu,
+	cancelamento_pos_pu,
+	noshow,
+	rol,
+	sold_cupons,
+	venda_mobile,
+	lucro_bruto,
+    taxa_parcelamento,
+    taxa_adquirente,
+    taxa_carrinho,
+    antifraude,
+    promocodes,
+    custo_antecipacao,
+    cancelamento_promocodes,           
+    venda_web,
+    venda_responsivo,
+    venda_email,
+    gmv
+)
+Select 
+    cast(c.name as int) Contract_number,
+	pt.pagename,
+	CAST(region.region AS VARCHAR(124)) AS accountregion,
+	dl.account_neighborhood bairro,
+	cast(aux.eventdate as date) dateforsale,
+	aux.unifieddiscountid uid,
+	dl.idoferta,
+	dl.title as DiscountName,
+	dl.link,
+	CAST(dl.account_name AS VARCHAR(124)) AS partnername,
+	dl.category category_name,
+	dl.phoenix_type tipo_site,
+	dl.phoenix_category categoria_site,
+	case 
+		when cto.of_subcategoria_site is not null then cto.of_subcategoria_site 
+		 when c.subcategoria_site      is not null then c.subcategoria_site 
+		else dl.tag_description 
+	end AS sub_categoria_site,
+	case 
+		when cto.of_sub_subcategoria_site is not null then cto.of_sub_subcategoria_site else c.subsub 
+	end as sub_sub_categoria,
+	dl.payment_terms AS condicao_pagamento,
+	cast(dl.publishing_date as date) Discount_Start,
+	cast(dl.expiration_date as date) Discount_end,	
+	proprietario.Proprietario_oferta, 
+	proprietario.team,
+	proprietario.coordinator,
+	proprietario.manager,
+	cast(dl.public as bool) public,
+	case 
+		when len(cfa.grupo_econ_mico_del) >= 100 then '' 
+	    else CAST(cfa.grupo_econ_mico_del AS VARCHAR(124)) 
+	end AS grupo_economico,
+	of_campanha_de_marketing as Campanha_Marketing,
+	criador_do_planejamento,
+	fonte_de_pesquisa,
+	Criador_Planejamento_Texto, 
+	Fonte_de_Pesquisa_Oferta,
+	pt.username Planner,
+	pt.coordinators,
+	CAST(cto.tipo_de_pagamento AS VARCHAR(24)) AS tipo_de_pagamento,
+	aux.channelid,
+	cast(max(dl.coupon_coupon_end_date) as date) expire_date,
+	sum(aux.grosssales) grosssales,
+	sum(aux.grosssalespucommission) grosssalespucommission,
+	sum(aux.cancelamento_pre_pu) cancelamento_pre_pu,
+	sum(aux.cancelamento_pos_pu) cancelamento_pos_pu,
+	sum(aux.noshow) noshow,
+	sum(aux.rol) rol,
+	SUM(AUX.sold_cupons) sold_cupons,
+	sum(aux.venda_mobile) venda_mobile,
+	---
+	sum(aux.lucro_bruto) lucro_bruto,
+    sum(aux.taxa_parcelamento) taxa_parcelamento,
+    sum(aux.taxa_adquirente) taxa_adquirente,
+    sum(aux.taxa_carrinho) taxa_carrinho,
+    sum(aux.antifraude) antifraude,
+    sum(aux.promocodes) promocodes,
+    sum(aux.custo_antecipacao) custo_antecipacao,
+    sum(aux.cancelamento_promocodes) cancelamento_promocodes,           
+    sum(aux.venda_web) venda_web,
+    sum(aux.venda_responsivo) venda_responsivo,
+    sum(aux.venda_email) venda_email,
+    sum(aux.gmv) gmv
+from temp_aux_dailyentries aux
+LEFT JOIN reports.publicationteam pt 								on aux.salespageid = pt.pageid
+LEFT JOIN temp_aux_dailyentries_dl dl								on aux.unifieddiscountid = dl.legacydata_unified_discount_id
+LEFT JOIN temp_aux_dailyentries_region region						on dl.deal_id = region.deal_id
+LEFT JOIN reports.account a 										on dl.account_account_id=a.accountid 
+LEFT JOIN temp_aux_dailyentries_proprietario_final proprietario		on proprietario.unifieddiscountid = dl.legacydata_unified_discount_id	 
+LEFT JOIN salesforce.ctcontratopu c 								on cast(c.name as int) = cast(dl.contract_number as int)
+LEFT JOIN salesforce.cfaccount cfa									on c.account = cfa.id_conta
+LEFT JOIN salesforce.ctofertas cto									on dl.idoferta = cto.c_digo_oferta_num_rico
+group by 
+	1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32,33
+	;
+
+drop table if exists temp_aux_dailyentries;
+drop table if exists temp_aux_dailyentries_dl;
+drop table if exists temp_aux_dailyentries_region;
+drop table if exists temp_aux_dailyentries_proprietario_final;
+
+commit;

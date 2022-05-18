@@ -1,0 +1,9 @@
+CaseStatus
+EmailMessage
+LoginHistory
+ContractStatus
+LeadStatus
+TaskPriority
+SolutionStatus
+UserRecordAccess
+Task

@@ -1,0 +1,93 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="12.0" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
+    <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
+    <ProductVersion>8.0.30703</ProductVersion>
+    <SchemaVersion>2.0</SchemaVersion>
+    <ProjectGuid>{D7F8E6CD-ECF1-4F65-A96C-9C452BC6F3F6}</ProjectGuid>
+    <OutputType>Library</OutputType>
+    <AppDesignerFolder>Properties</AppDesignerFolder>
+    <RootNamespace>BusinessIntelligence.Listening</RootNamespace>
+    <AssemblyName>BusinessIntelligence.Listener</AssemblyName>
+    <TargetFrameworkVersion>v4.8</TargetFrameworkVersion>
+    <FileAlignment>512</FileAlignment>
+    <TargetFrameworkProfile />
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
+    <DebugSymbols>true</DebugSymbols>
+    <DebugType>full</DebugType>
+    <Optimize>false</Optimize>
+    <OutputPath>bin\Debug\</OutputPath>
+    <DefineConstants>DEBUG;TRACE</DefineConstants>
+    <ErrorReport>prompt</ErrorReport>
+    <WarningLevel>4</WarningLevel>
+    <Prefer32Bit>false</Prefer32Bit>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
+    <DebugType>pdbonly</DebugType>
+    <Optimize>true</Optimize>
+    <OutputPath>bin\Release\</OutputPath>
+    <DefineConstants>TRACE</DefineConstants>
+    <ErrorReport>prompt</ErrorReport>
+    <WarningLevel>4</WarningLevel>
+    <Prefer32Bit>false</Prefer32Bit>
+  </PropertyGroup>
+  <PropertyGroup>
+    <StartupObject>
+    </StartupObject>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="CommandLine, Version=1.9.71.2, Culture=neutral, PublicKeyToken=de6f01bd326f8c32, processorArchitecture=MSIL">
+      <HintPath>..\packages\CommandLineParser.1.9.71\lib\net40\CommandLine.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+    <Reference Include="System" />
+    <Reference Include="System.Core" />
+    <Reference Include="System.Xml.Linq" />
+    <Reference Include="System.Data.DataSetExtensions" />
+    <Reference Include="Microsoft.CSharp" />
+    <Reference Include="System.Data" />
+    <Reference Include="System.Xml" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="AlertListener.cs" />
+    <Compile Include="ExecutionStep.cs" />
+    <Compile Include="ListenerConfigInfo.cs" />
+    <Compile Include="EmailListenerConfigurationInfo.cs" />
+    <Compile Include="ProcessExecutionListener.cs" />
+    <Compile Include="EmailListener.cs" />
+    <Compile Include="Listener.cs" />
+    <Compile Include="ProcessExecutionListenerConfigInfo.cs" />
+    <Compile Include="Properties\AssemblyInfo.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\BusinessIntelligence.Common\BusinessIntelligence.Common.csproj">
+      <Project>{7E29ADDD-D954-4319-872F-057D4271CDE7}</Project>
+      <Name>BusinessIntelligence.Common</Name>
+    </ProjectReference>
+    <ProjectReference Include="..\BusinessIntelligence.IMAPClient\BusinessIntelligence.IMAPClient.csproj">
+      <Project>{909F2474-1F08-478C-BEB4-1CBCA3D04D49}</Project>
+      <Name>BusinessIntelligence.IMAPClient</Name>
+    </ProjectReference>
+    <ProjectReference Include="..\BusinessIntelligence.MIME\BusinessIntelligence.MIME.csproj">
+      <Project>{634B0667-4C7D-4E0A-BA15-FEAD9DA0F44A}</Project>
+      <Name>BusinessIntelligence.MIME</Name>
+    </ProjectReference>
+    <ProjectReference Include="..\BusinessIntelligence.Report\BusinessIntelligence.Report.csproj">
+      <Project>{f912eeba-f5e5-4d6d-9dbc-a6fb8f9ec2a9}</Project>
+      <Name>BusinessIntelligence.Report</Name>
+    </ProjectReference>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="packages.config" />
+  </ItemGroup>
+  <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+  <!-- To modify your build process, add your task inside one of the targets below and uncomment it. 
+       Other similar extension points exist, see Microsoft.Common.targets.
+  <Target Name="BeforeBuild">
+  </Target>
+  <Target Name="AfterBuild">
+  </Target>
+  -->
+</Project>

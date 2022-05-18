@@ -1,0 +1,337 @@
+
+drop table if exists #UserActivity;
+drop table if exists #UserActivity2;
+drop table if exists #UserSales;
+drop table if exists #UserSales2;
+
+
+set 
+select
+	LastReportDate 
+,	DaysForReprocessing
+,	DaysForExecution
+,	LastTimeRead
+from reports.Reports
+where ReportID = 2
+;
+
+if (<@forcereprocessing@> = 0)
+{
+	
+	set	select max(PurchaseInitiated) LastTimeAvailable 
+		from reports.Sales;
+	
+	
+	if (<@lasttimeavailable@> = <@lasttimeread@>)
+	{
+		return;
+	
+	}else
+	{
+
+		print ('Tudo será processado');
+	}
+
+}
+
+if(<@InitialDate@> = '')
+{
+	set select dateadd(day,(<@DaysForReprocessing@> + 2) * -1, <@LastReportDate@>) InitialDate; 
+
+	set select dateadd(day,(<@DaysForExecution@>) * -1 ,CAST(getdate() as DATE)) EndDate ;
+
+}else
+{
+
+	set select cast(<@InitialDate@> as date) InitialDate; 
+	set select cast(<@EndDate@> as date) EndDate ;
+}
+
+
+
+
+set select <@InitialDate@> StatusDate;
+
+
+
+create table #UserSales
+(
+	PurchaseID int
+,	CityID int
+,	CategoryID int
+,	UserAccountID int
+,	PurchaseInitiated datetime
+,	SaleDate date
+,	SaleMonth int
+,	Ordem int
+)
+distkey(UserAccountID )
+sortkey(UserAccountID, Ordem  );
+/*
+
+insert into #UserSales
+select 
+	PurchaseID
+,	p.CityID
+,	coalesce(uc.CategoryId,-2)
+,	coalesce(uu.unifieduseraccountid,s.useraccountid) unifieduseraccountid
+,	PurchaseInitiated
+,	cast( PurchaseInitiated as date) SaleDate
+,	(date_part(year,PurchaseInitiated) * 12) + date_part(month,PurchaseInitiated) SaleMonth
+,	rank() over (partition by coalesce(uu.unifieduseraccountid,s.useraccountid) order by PurchaseInitiated,PurchaseID) ordem
+from reports.Sales s
+left join reports.useraccountunification uu
+on s.useraccountid = uu.useraccountid
+left join reports.Page p
+on p.PageID = s.SalesPageID
+left join reports.UnifiedDiscountCategory uc
+on  uc.UnifiedDiscountId = s.UnifiedDiscountId
+where GrossSales > 0
+;
+*/
+
+
+insert into #UserSales
+select 
+	PurchaseID
+,	p.CityID
+,	coalesce(uc.CategoryId,-2)
+,	s.useraccountid useraccountid
+,	PurchaseInitiated
+,	cast( PurchaseInitiated as date) SaleDate
+,	(date_part(year,PurchaseInitiated) * 12) + date_part(month,PurchaseInitiated) SaleMonth
+,	rank() over (partition by s.useraccountid order by PurchaseInitiated,PurchaseID) ordem
+from reports.Sales s
+left join reports.Page p
+on p.PageID = s.SalesPageID
+left join reports.UnifiedDiscountCategory uc
+on  uc.UnifiedDiscountId = s.UnifiedDiscountId
+where GrossSales > 0
+;
+
+-- Tabela temporária para armazenamento e exibição posterior dos dados
+
+CREATE TABLE #UserActivity
+ (
+  CityID int,
+  CategoryID int,
+  StatusDate   DATE,
+  QTYInactivation int ,
+  QTYInactive int ,
+  QTYLowActivity int ,
+  QTYHighActivity int ,
+  QTYDailyCustomers  int,
+  QTYActivated int,
+  QTYActivations int,
+  QTYReactivations int,
+  QTYMonthlyCustomers int,
+  QTYRepurchases30 int,
+  QTYRepurchases60 int,
+  QTYCustomers60 int,
+  QTYCustomers90 int,
+  QTYCustomers365 int,
+  QTYInactive365 int,
+  LifeMonths int,
+  InactivationMonths int,
+  QTYReactivations365 int,
+  QTYInactivations365 int
+ )
+;
+
+
+select
+		us1.CityID
+	,	coalesce(us1.CategoryID,-2) CategoryID 
+	,	sum(
+		case	
+			when us2.PurchaseInitiated IS null
+				then 1
+			else 0 
+		end) QTYActivations
+	,	sum(
+		case	
+			when DATEDIFF(day,us2.PurchaseInitiated,us1.PurchaseInitiated)	> 90
+			then 1
+			else 0
+		end) QTYReactivations
+	,	sum(
+		case	
+			when DATEDIFF(day,us2.PurchaseInitiated,us1.PurchaseInitiated)	> 365
+			then 1
+			else 0
+		end) QTYReactivations365
+	,	sum(
+		case	
+			when us2.SaleMonth  = us1.SaleMonth
+			then 0
+			else 1
+		end) QTYCustomersMonthly
+	,	sum(
+		case	
+			when DATEDIFF(day,us2.SaleDate,us1.SaleDate)	<= 30
+			then 1
+			else 0
+		end) QTYRepurchases30	
+	,	sum(
+		case	
+			when DATEDIFF(day,us2.SaleDate,us1.SaleDate)	<= 60
+			then 1
+			else 0
+		end) QTYRepurchases60
+	,	count(distinct us1.UserAccountID) QtyCustomers
+	,	us1.SaleDate	
+	into #UserActivity2		
+	from #UserSales us1
+	left join #UserSales us2
+	on 
+		us1.UserAccountID = us2.UserAccountID
+	and us1.ordem = us2.ordem + 1
+	where us1.SaleDate  between <@InitialDate@> and <@EndDate@>
+	group by 
+		us1.CityID
+	,	coalesce(us1.CategoryID,-2)
+	,	us1.SaleDate
+;
+
+
+create table #UserSales2 
+(
+	UserAccountID int
+,	CityID int
+,	CategoryID int
+,	SaleDate date
+)
+distkey(UserAccountID )
+sortkey(UserAccountID);
+
+
+WHILE (<@StatusDate@> <= <@EndDate@>)
+
+{
+
+
+insert into #UserSales2
+select  
+	UserAccountID
+,	CityID
+,	CategoryID
+,	SaleDate
+from
+		(
+			select
+				UserAccountID
+			,	CityID
+			,	CategoryID
+			,	cast(PurchaseInitiated as date) SaleDate
+			,	rank() over (partition by UserAccountID order by PurchaseInitiated desc,PurchaseID desc) ordem
+			from
+			#UserSales 
+			where	cast(PurchaseInitiated as date) <= <@StatusDate@>
+		) x
+where ordem = 1;
+
+INSERT INTO #UserActivity
+ (
+  CityID,
+  CategoryId,
+  StatusDate,
+  QTYInactivation,
+  QTYInactive,
+  QTYLowActivity,
+  QTYHighActivity,
+  QTYDailyCustomers,
+  QTYActivated,
+  QTYActivations,
+  QTYReactivations,
+  QTYMonthlyCustomers,
+  QTYRepurchases30,
+  QTYRepurchases60,
+  QTYCustomers60,
+  QTYCustomers90,
+  QTYCustomers365,
+  QTYInactive365,
+  LifeMonths,
+  InactivationMonths,
+  QTYReactivations365,
+  QTYInactivations365
+ )
+ 
+select
+	coalesce(a.CityID,b.CityID) CityID
+,	coalesce(a.CategoryID,b.CategoryID,-2) CategoryID
+,	<@StatusDate@>
+,	QTYInactivation
+,   	QTYInactive
+,   	QTYLowActivity
+,   	QTYHighActivity
+,   	QTYCustomers
+,   	QTYActivated
+,   	coalesce(QTYActivations,0)
+,   	coalesce(QTYReactivations,0)
+,	coalesce(QTYCustomersMonthly,0)
+,	coalesce(QTYRepurchases30,0)
+,	coalesce(QTYRepurchases60,0)
+,	coalesce(QTYCustomers60,0)
+,	coalesce(QTYCustomers90,0)
+,	coalesce(QTYCustomers365,0)
+,	coalesce(QTYInactive365,0)
+,	null
+,	coalesce(InactivationMonths,0)
+,	coalesce(QTYReactivations365,0)	
+,	coalesce(QTYInactivation365,0)
+
+from
+(
+		select 
+			s.CityID
+		,	coalesce(s.CategoryID,-2) CategoryID
+		,	count(distinct s.UserAccountID) QTYActivated
+		,	count(distinct case when DATEDIFF (DAY, SaleDate, <@StatusDate@>) = 91 then  s.UserAccountID else null end) QTYInactivation
+		,	count(distinct case when DATEDIFF (DAY, SaleDate, <@StatusDate@>) = 366 then  s.UserAccountID else null end) QTYInactivation365
+		,	count(distinct case when DATEDIFF (DAY, SaleDate, <@StatusDate@>) >= 121 then  s.UserAccountID else null end) QTYInactive
+		,	count(distinct case when DATEDIFF (DAY, SaleDate, <@StatusDate@>) between 31 and 120 then  s.UserAccountID else null end) QTYLowActivity
+		,	count(distinct case when DATEDIFF (DAY, SaleDate, <@StatusDate@>) < 31 then  s.UserAccountID else null end) QTYHighActivity
+		,	count(distinct case when DATEDIFF (DAY, SaleDate, <@StatusDate@>) < 61 then  s.UserAccountID else null end) QTYCustomers60
+		,	count(distinct case when DATEDIFF (DAY, SaleDate, <@StatusDate@>) < 91 then  s.UserAccountID else null end) QTYCustomers90
+		,	count(distinct case when DATEDIFF (DAY, SaleDate, <@StatusDate@>) < 366 then  s.UserAccountID else null end) QTYCustomers365
+		,	count(distinct case when DATEDIFF (DAY, SaleDate, <@StatusDate@>) >= 366 then  s.UserAccountID else null end) QTYInactive365
+		,	sum(case when DATEDIFF (DAY, SaleDate, <@StatusDate@>) >= 366 then datediff(month,SaleDate,<@StatusDate@>) else 0 end) InactivationMonths		
+		from 	#UserSales2 	s
+		group by
+			s.CityID
+		,	coalesce(s.CategoryID,-2)
+
+)a	
+full join
+( select * from #UserActivity2
+where saleDate = <@StatusDate@>
+) b
+on a.CityID = b.CityID
+and a.CategoryId = b.CategoryId;
+
+
+delete from reports.UserActivity
+where StatusDate = <@StatusDate@>;
+
+insert into reports.UserActivity
+select distinct * from #UserActivity
+;
+delete from #UserActivity
+;
+
+SET select  DATEADD(DAY, 1, <@StatusDate@>) StatusDate;
+
+
+};
+
+
+
+if (<@forceReprocessing@> = 0)
+{
+update reports.Reports 
+set 
+	LastRefreshTime = GETDATE()
+,	LastReportDate = <@EndDate@>
+,	LastTimeRead = <@LastTimeAvailable@>
+where ReportID = 2
+};commit

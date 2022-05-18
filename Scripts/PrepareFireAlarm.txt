@@ -1,0 +1,251 @@
+drop table if exists reports.firealarm;
+drop table if exists #dl;
+drop table if exists #pr;
+drop table if exists #Pre_work;
+drop table if exists #ite;
+drop table if exists #Almost_there;
+drop table if exists #vaiagora;
+with #dl as (SELECT DISTINCT account_account_id as account_id, deal_id, account_industry, account_local_category, account_name, phoenix_category, legacydata_unified_discount_id, enabled_domains, title FROM ods.mng_deals_latest WHERE expiration_date >= (SELECT (CURRENT_TIMESTAMP - INTERVAL '181 days') as data)),	
+ #pr as (SELECT dr.purchaseid, sum(coalesce(dr.grosssales, 0)) "Gross_sales"        
+ , sum((coalesce(dr.grosssalespucommission, 0) + coalesce(dr.NoShow, 0) + coalesce(dr.financecharge, 0) + coalesce(dr.extrafeespu, 0) + coalesce(dr.administrativefee, 0)) -          
+    (coalesce(dr.CancellationPreBillingPU, 0) + coalesce(dr.cancellationposbillingpu, 0) + coalesce(dr.cancellationextrafeespu, 0) + coalesce(dr.cancellationfinancecharge, 0) + coalesce(dr.cancellationadministrativefee, 0)) -        
+    (coalesce(dr.aquirerfee, 0) + coalesce(dr.antifraudfee, 0) + coalesce(dr.promocodes, 0) + coalesce(dr.anticipationcost, 0) - coalesce(dr.cancellationpromocodes, 0))) "grossprofit"        
+ , sum(coalesce(dr.grosssales, 0) + coalesce(dr.financecharge, 0) + coalesce(dr.extrafees, 0)) "GMV" from reports.purchaserevenue dr WHERE dr.orderdate >= (SELECT (CURRENT_TIMESTAMP - INTERVAL '181 days') as data) GROUP BY dr.purchaseid)
+ ,#phist as (SELECT distinct ap.purchaseid, ap.mktsourceid, ms.mktsourcename, ap.accesstypeid, ap.sourceid from reports.approvalpurchases ap left join reports.mktsource ms on ap.mktsourceid = ms.mktsourceid WHERE ap.purchasedate >= (SELECT (CURRENT_TIMESTAMP - INTERVAL '181 days') as data))
+ ,#pre_work as (SELECT
+	vds.purchaseid, 
+	vds.totalvalue,
+	vds.quantity,
+	vds.regionid,
+	pgs.pagetype,
+	pgs.title as pg_name,
+	#dl.account_industry, 
+	#dl.phoenix_category,
+	#dl.account_id,
+	#dl.account_name,
+	#dl.deal_id,
+	#dl.title as oferta,
+	#phist.accesstypeid,
+	#phist.mktsourcename,
+	#phist.sourceid,
+	cast(to_char(vds.purchaseinitiated, 'YYYY-MM-DD') as date) dt_compra,
+	disc.discountid, 
+	disc.partnerid,
+	#pr.Gross_sales,
+	#pr.grossprofit,
+	#pr.GMV
+FROM ods.purchase vds
+LEFT JOIN stage.purchasestatus sts ON vds.purchasestatusid = sts.purchasestatusid 
+LEFT join ods.discount disc on vds.discountid = disc.discountid 
+left join #dl on disc.unifieddiscountid = #dl.legacydata_unified_discount_id
+left join stage.mng_pages_latest pgs on vds.regionid = pgs.legacyregionid
+LEFT JOIN #pr ON vds.purchaseid = #pr.purchaseid
+LEFT JOIN #phist on vds.purchaseid = #phist.purchaseid
+WHERE vds.purchaseinitiated >= (SELECT (CURRENT_TIMESTAMP - INTERVAL '181 days') as data)
+AND  sts.countsasrevenue = 1
+),
+#semifinal as (select 
+ pw.dt_compra
+ , pw.account_id
+ , pw.account_name
+ , pw.account_industry
+ , pw.phoenix_category
+ , pw.pg_name
+ , pw.deal_id
+ , pw.oferta
+ , pw.mktsourcename
+ , pw.sourceid
+ , case pw.accesstypeid when 1 then 'PC' else 'Mobile' end as accessname
+ , SUM(pw.quantity) AS QTD
+ , SUM(pw.Gross_sales) AS Gross_sales
+ , SUM(pw.grossprofit) AS grossprofit
+ , SUM(pw.GMV) AS GMV
+FROM #pre_work pw
+GROUP BY  
+   pw.dt_compra
+ , pw.account_id
+ , pw.account_name
+ , pw.account_industry
+ , pw.phoenix_category
+ , pw.pg_name
+ , pw.deal_id
+ , pw.oferta
+ , pw.mktsourcename
+ , pw.sourceid
+ , accessname
+)
+SELECT
+	dt_compra,
+	cast(to_char(dt_compra,	'D') as integer) as dia_semana,
+	cast(to_char(dt_compra, 'W') as integer) as semana_mes,
+	cast(to_char(dt_compra,	'WW') as integer) as semana_ano,
+	CAST(TRIM( to_char( date_part( YEAR, dt_compra ), '0000' ))|| '-' || TRIM( to_char( date_part( MONTH, dt_compra ), '00' ))|| '-01' as date	) as mes,
+	pg_name,
+	account_industry,
+	phoenix_category,
+	mktsourcename,
+	sourceid,
+ 	accessname,
+ 	sum( qtd ) as qtd,
+	sum( gross_sales ) as gross_sales,
+	sum( gmv ) as gmv,
+	sum( grossprofit ) as grossprofit 
+	into #Almost_there
+	FROM #semifinal
+	GROUP BY
+		dt_compra,
+		dia_semana,
+		semana_mes,
+		semana_ano,
+		mes,
+		pg_name,
+		account_industry,
+		phoenix_category,
+		mktsourcename,
+		sourceid,
+		accessname
+ 		;
+
+ drop table if exists #vaiagora;
+ with #ite as (SELECT distinct lista.dia_semana, lista.semana_mes, catt.pg_name, catt.account_industry,  catt.phoenix_category, catt.mktsourcename, catt.sourceid, catt.accessname, lista.dt_compra FROM #Almost_there catt full outer JOIN  (SELECT DISTINCT dt_compra, dia_semana, semana_mes, pg_name FROM #Almost_there) lista ON  lista.pg_name = catt.pg_name order by lista.dt_compra)
+ 	select
+	ite.dt_compra,
+	ite.dia_semana,
+	ite.semana_mes,
+	ite.pg_name,
+	ite.account_industry,
+	ite.phoenix_category,
+	ite.mktsourcename,
+	ite.sourceid,
+	ite.accessname,
+	ee.gross_sales as gross_sales,
+	ee.grossprofit as grossprofit,
+	ee.gmv as gmv,
+	(
+		SELECT
+		CASE WHEN (count(dd.gross_sales) - 2) = 0 then 
+			avg(dd.gross_sales)
+		ELSE
+			( sum(dd.gross_sales) - max(dd.gross_sales) - min(dd.gross_sales) )/(count(dd.gross_sales) - 2)
+		END  as gross_sales
+		from
+			#Almost_there dd
+		where
+			dd.dt_compra < ee.dt_compra 
+			and dd.dt_compra >= dateadd('d',-56, ee.dt_compra)
+			and ee.dia_semana = dd.dia_semana
+			and ee.pg_name = dd.pg_name
+			and ee.account_industry = dd.account_industry
+			and ee.phoenix_category = dd.phoenix_category
+			and ee.mktsourcename = dd.mktsourcename
+			and ee.accessname = dd.accessname
+			and ee.sourceid = dd.sourceid
+	) as gross_sales_prev,
+	(
+		SELECT
+CASE WHEN (count(ff.gmv) - 2) = 0 then 
+			avg(ff.gmv)
+		ELSE
+			( sum(ff.gmv) - max(ff.gmv) - min(ff.gmv) )/(count(ff.gmv) - 2)
+		END  as gmv
+		from
+			#Almost_there ff
+		where
+			ff.dt_compra < ee.dt_compra 
+			and ff.dt_compra >= dateadd('d',-56, ee.dt_compra)
+			and ee.dia_semana = ff.dia_semana
+			and ee.pg_name = ff.pg_name
+			and ee.account_industry = ff.account_industry
+			and ee.phoenix_category = ff.phoenix_category
+			and ee.mktsourcename = ff.mktsourcename
+			and ee.accessname = ff.accessname
+			and ee.sourceid = ff.sourceid
+	) as gmv_prev,
+	(
+		SELECT
+				CASE WHEN (count(gg.grossprofit) - 2) = 0 then 
+			avg(gg.grossprofit)
+		ELSE
+			( sum(gg.grossprofit) - max(gg.grossprofit) - min(gg.grossprofit) )/(count(gg.grossprofit) - 2)
+		END  as grossprofit
+		from
+			#Almost_there gg
+		where
+			gg.dt_compra < ee.dt_compra 
+			and gg.dt_compra >= dateadd('d',-56, ee.dt_compra)
+			and ee.dia_semana = gg.dia_semana
+			and ee.pg_name = gg.pg_name
+			and ee.account_industry = gg.account_industry
+			and ee.phoenix_category = gg.phoenix_category
+			and ee.mktsourcename = gg.mktsourcename
+			and ee.accessname = gg.accessname
+			and ee.sourceid = gg.sourceid
+	) as grossprofit_prev
+	into #vaiagora
+	from #ite ite FULL OUTER JOIN
+	(SELECT 	alm.dt_compra,
+	alm.dia_semana,
+	alm.semana_mes,
+	alm.pg_name,
+	alm.account_industry,
+	alm.phoenix_category,
+	alm.mktsourcename,
+	alm.sourceid,
+	alm.accessname,
+	sum(alm.gross_sales) as gross_sales,
+	sum(alm.grossprofit) as grossprofit,
+	sum(alm.gmv) as gmv FROM #Almost_there alm GROUP BY 1,2,3,4,5,6,7,8,9) ee ON
+	ite.dt_compra = ee.dt_compra and
+	ite.pg_name = ee.pg_name and
+	ite.account_industry = ee.account_industry and
+	ite.phoenix_category = ee.phoenix_category and
+	ite.mktsourcename = ee.mktsourcename and
+	ite.sourceid = ee.sourceid and
+	ite.accessname = ee.accessname	
+	where ite.dt_compra >= '2018-01-01'
+	order by ite.dt_compra DESC
+;	
+
+select 
+va.dt_compra,
+	va.dia_semana,
+	va.semana_mes,
+	va.pg_name,
+	va.account_industry,
+	va.phoenix_category,
+	va.mktsourcename,
+	va.sourceid,
+	va.accessname,
+	'1' as purchasestatusname,
+coalesce(sum(va.gross_sales),0) as gross_sales,
+coalesce(sum(va.grossprofit),0) as grossprofit,
+coalesce(sum(va.gmv),0) as gmv,
+coalesce(sum(va.gross_sales_prev),(SELECT
+			CASE WHEN (count(dd.gross_sales) - 2) = 0 then 
+				avg(dd.gross_sales)
+			ELSE
+				( sum(dd.gross_sales) - max(dd.gross_sales) - min(dd.gross_sales) )/(count(dd.gross_sales) - 2)
+			END  as gross_sales_prev
+			from
+				#vaiagora dd
+			where
+				dd.dt_compra < va.dt_compra 
+				and dd.dt_compra >= dateadd('d',-180, va.dt_compra)
+				and va.dia_semana = dd.dia_semana
+				and va.pg_name = dd.pg_name
+				and va.account_industry = dd.account_industry
+				and va.phoenix_category = dd.phoenix_category
+				and va.mktsourcename = dd.mktsourcename
+				and va.accessname = dd.accessname
+				and va.sourceid = dd.sourceid
+			),0) as gross_sales_prev,
+coalesce(sum(va.grossprofit_prev),0) as grossprofit_prev,
+coalesce(sum(va.gmv_prev),0) as gmv_prev
+into reports.firealarm from #vaiagora va 
+GROUP BY 1,2,3,4,5,6,7,8,9,10
+having coalesce(sum(va.gross_sales),0) <> 0 or coalesce(sum(va.gross_sales_prev),0) <> 0
+ORDER BY dt_compra DESC;
+
+
+grant all privileges on table reports.firealarm to group bi_group;
+grant all privileges on table reports.firealarm to group bi_group_r;

@@ -1,0 +1,199 @@
+drop table if exists #fishHookAccounts
+;
+SELECT
+	x.accountid
+,	x.SalesforceOwnerId
+,	x.ownerEmail
+,	x.IsOwnerActive
+,	x.ValueToRank
+,	rank() over(partition by x.SalesforceOwnerId order by x.ValueToRank desc, x.accountid asc ) rankPosition
+,	LastRevenueDate
+,	ValueToCut
+,	accountCutValue
+-- acrescentado campo ruleHam
+,   ruleHam
+into #fishHookAccounts
+from
+	(
+	select
+		accountid
+	,	SalesforceOwnerId
+	,	ownerEmail
+	,	IsOwnerActive
+	,	LastRevenueDate
+	-- acrescentado campo ruleHam
+	,   'GMV até 6 meses atras' ruleHam
+	,	sum(ValueToRank) ValueToRank
+	,	sum(ValueToCut) ValueToCut
+	,	avg(accountCutValue) accountCutValue
+	from
+	(
+	select
+		c.accountid
+	,	acc.SalesforceOwnerId
+	,	coalesce(cadf.email,us.email) ownerEmail
+	,	case when EVAtivo.email is not null then 'Sim' else 'Não' end  IsOwnerActive
+	,	case when grosssales > 0 then max(dr.eventdate) over(partition by c.accountid) else null end LastRevenueDate
+	,	dr.grossprofit ValueToRank
+	,	case when dr.eventdate - min(dr.eventdate) over(partition by c.accountid) <= 180 then gmv else 0 end ValueToCut
+	,	accountCutValue
+	from ods.unifieddiscount ud
+	left join reports.sfcontract c
+	on ud.contractid = c.contractid
+	left join reports.sfaccount acc 
+	on c.accountid = acc.salesforceaccountid
+	left join 
+	(
+	select distinct
+		accountid
+	from reports.unifieddiscountscheduling
+	where dateforsale between cast(getdate() as date) - 90 and cast(getdate() as date) + 30
+	) recentes
+	on acc.salesforceaccountid = recentes.accountid
+	left join reports.vw_discountRevenue dr 
+	on dr.unifieddiscountid = ud.unifieddiscountid
+	left join salesforce.ctcadastro_de_funcion_rios cadf 
+	on cast(cadf.id as char(15)) = acc.salesforceownerid
+	left join salesforce.sfuser us 
+	on cast(us.id as char(15)) = acc.salesforceownerid
+	inner join 
+		(
+			select email,min(accountCutValue) accountCutValue from salesforce.ctcadastro_de_funcion_rios x
+			inner join
+			(
+				select variable EVNAme, oe.owner,ot.team,coalesce(ft.accountCutValue,0) accountCutValue
+				from reports.goal_grossprofit g
+				inner join (select max((year * 12) + month)  yearmonth from reports.goal_grossprofit a)
+				on  ((year * 12) + month) = yearmonth
+ 				left join reports.ownererp oe
+  				on oe.ownererp = g.variable
+ 				left join reports.ownerteam ot
+  				on ot.ownererp = oe.ownererp
+  				left join reports.FishhookTeam ft
+  				on ot.team = ft.team
+				where "group" = 'Executivo de Vendas'
+			) EV
+			on upper(x.name) = upper(coalesce(ev.owner, ev.EVNAme))
+			group by 1
+			order by 1
+		) EVAtivo
+	on EVAtivo.email = coalesce(cadf.email,us.email)
+	where recentes.accountid is null
+	and acc.salesforceownerid is not null 
+	and dr.EventDate >  cast(getdate() as date) - (18 * 30)
+	) y
+	-- acrescentado agrupamento 6
+	group by 1,2,3,4,5,6
+	having sum(ValueToCut) >= avg(accountCutValue)
+	-- acrescentado UNION ALL
+	--------------
+	union all
+	--------------
+	select
+		accountid
+	,	SalesforceOwnerId
+	,	ownerEmail
+	,	IsOwnerActive
+	,	LastRevenueDate
+	-- acrescentado campo ruleHam
+	,   'GMV no Mes '||monthCutValue||' um Ano atras' ruleHam
+	,	sum(ValueToRank) ValueToRank
+	,	sum(ValueToCut) ValueToCut
+	,	avg(accountCutValue) accountCutValue
+	from
+	(
+	select
+		c.accountid
+	,	acc.SalesforceOwnerId
+	,	coalesce(cadf.email,us.email) ownerEmail
+	,	case when EVAtivo.email is not null then 'Sim' else 'Não' end  IsOwnerActive
+	,	case when grosssales > 0 then max(dr.eventdate) over(partition by c.accountid) else null end LastRevenueDate
+	,	dr.grossprofit ValueToRank
+	,	case when dr.eventdate - min(dr.eventdate) over(partition by c.accountid) <= 180 then gmv else 0 end ValueToCut
+	,	accountCutValue
+	-- Acrescentado campo monthCutValue
+	,   monthCutValue
+	from ods.unifieddiscount ud
+	left join reports.sfcontract c
+	on ud.contractid = c.contractid
+	left join reports.sfaccount acc 
+	on c.accountid = acc.salesforceaccountid
+	left join 
+	(
+	select distinct
+		accountid
+	from reports.unifieddiscountscheduling
+	where dateforsale between cast(getdate() as date) - 90 and cast(getdate() as date) + 30
+	) recentes
+	on acc.salesforceaccountid = recentes.accountid
+	left join reports.vw_discountRevenue dr 
+	on dr.unifieddiscountid = ud.unifieddiscountid
+	left join salesforce.ctcadastro_de_funcion_rios cadf 
+	on cast(cadf.id as char(15)) = acc.salesforceownerid
+	left join salesforce.sfuser us 
+	on cast(us.id as char(15)) = acc.salesforceownerid
+	inner join 
+		(
+			-- removido -- min(accountCutValue) e acrescentado monthCutValue
+			select email,accountCutValue,monthCutValue 
+			from salesforce.ctcadastro_de_funcion_rios x
+			inner join
+			(	
+				-- acrescentado ft.month
+				select variable EVNAme, oe.owner,ot.team,coalesce(ft.accountCutValue,0) accountCutValue, ft.month monthCutValue
+				from reports.goal_grossprofit g
+				inner join (select max((year * 12) + month)  yearmonth from reports.goal_grossprofit a)
+				on  ((year * 12) + month) = yearmonth
+ 				left join reports.ownererp oe
+  				on oe.ownererp = g.variable
+ 				left join reports.ownerteam ot
+  				on ot.ownererp = oe.ownererp
+				-- Alterado tabela para FishhookTeam_annually
+  				left join reports.FishhookTeam_annually ft
+  				on ot.team = ft.team
+				where "group" = 'Executivo de Vendas'
+			) EV
+			on upper(x.name) = upper(coalesce(ev.owner, ev.EVNAme))
+			-- Acrescentado agrupamento 2 e 3
+			group by 1,2,3
+			order by 1
+		) EVAtivo
+	on EVAtivo.email = coalesce(cadf.email,us.email)
+	where recentes.accountid is null
+	and acc.salesforceownerid is not null 
+	-- acrescentado comparacao com Ano anterior
+	and extract(year from dr.EventDate) = (extract(year from getdate())-1)
+	-- acrescentado comparacao com Mes monthCutValue
+	and extract(month from dr.EventDate) = EVAtivo.monthCutValue
+	) y
+	-- acrescentado agrupamento 6
+	group by 1,2,3,4,5,6
+	having sum(ValueToCut) >= avg(accountCutValue)
+	)x
+;
+
+-- Exclui duplicados pelo Ranking
+	delete from #fishHookAccounts
+	where accountid in (
+		select 
+			accountid 
+		from #fishHookAccounts 
+		group by accountid
+		having count(1)>1
+		)
+		and accountid||'-'||rankposition not in (
+		select 
+			accountid||'-'||min(rankposition) 
+		from #fishHookAccounts 
+		group by accountid
+		having count(1)>1
+		)
+;
+
+
+delete from reports.fishHookAccounts
+;
+
+insert into reports.fishHookAccounts
+select * from #fishHookAccounts
+;

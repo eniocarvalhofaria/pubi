@@ -1,0 +1,9 @@
+select  
+	case when trim(tipo_site_oferta) = '' then null else tipo_site_oferta end CategoryType
+,	case when trim(categoria_site_oferta) = '' then null else categoria_site_oferta end CategoryGroup
+,	case when trim(subcategoria_site_oferta) = '' then null else subcategoria_site_oferta end  Category
+,	case when trim(sub_subcategoria_site_oferta) = '' then null else sub_subcategoria_site_oferta end SubCategory
+,	count(*) qty
+from salesforce.ctop_es_de_compra 
+group by 1,2,3,4
+order by 5 desc

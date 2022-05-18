@@ -1,0 +1,15 @@
+﻿
+cast(
+cast(year(getdate()) + 
+case
+	when month(getdate()) -  month(<@aniversary@>) between -5 and 5 then 0
+	when month(getdate()) >  month(<@aniversary@>) then 1
+	else - 1
+end as char(4)) + '-' + 
+substring(cast(month(<@aniversary@>) + 100 as char(3)),2,2) + '-' +
+case
+	when day(BirthDay) = 29 and month(BirthDay) = 2
+	then '28'
+	else substring(cast(day(<@aniversary@>) + 100 as char(3)),2,2) 
+end
+ as date)

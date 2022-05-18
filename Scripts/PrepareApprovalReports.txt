@@ -1,0 +1,306 @@
+drop table if exists aux_pphorder;
+
+create temporary table aux_pphorder
+(
+	purchasepaymenthistoryid int
+,	purchaseid int
+,	historypaymentmethodid int 
+,	date date
+,	purchasestatusid int
+)
+distkey(purchaseid)
+sortkey(purchasepaymenthistoryid)
+;
+	
+insert into aux_pphorder
+select 
+	purchasepaymenthistoryid
+,	purchaseid
+,	historypaymentmethodid  
+,	date 
+,	case when originalreturn ilike '%requisicao-cancelamento%' then 9 else  purchasestatusid end purchasestatusid
+from ods.purchasepaymenthistory
+where not (PurchaseStatusID = 1 and historyPaymentMethodID not in (6,14,18,5))
+;
+
+analyze aux_pphorder;
+
+drop table if exists #pphorder;
+
+create table #pphorder
+(
+	purchasepaymenthistoryid int
+,	purchasepaymentdataid int
+,	sortorder int
+,	historypaymentmethodid int 
+,	date date
+,	purchasestatusid int
+)
+distkey(purchasepaymentdataid)
+sortkey(purchasepaymentdataid,sortorder)
+;
+	
+insert into #pphorder
+select 
+	purchasepaymenthistoryid
+,	purchaseid
+,	rank() over(partition by purchaseid order by purchasepaymenthistoryid)
+,	historypaymentmethodid  
+,	date 
+,	purchasestatusid
+from aux_pphorder
+;
+
+drop table if exists #pphorderstatus;
+
+create table #pphorderstatus
+(
+	purchasepaymenthistoryid int
+,	purchasepaymentdataid int
+,	sortorder int
+,	historypaymentmethodid int 
+,	date date
+,	approvalstatusid int
+)
+distkey(purchasepaymentdataid)
+sortkey(purchasepaymentdataid,sortorder)
+;
+insert into #pphorderstatus
+	select 
+		b.purchasepaymenthistoryid 
+	,	b.purchasepaymentdataid 
+	,	b.sortorder 
+	,	b.historypaymentmethodid  
+	,	b.date 
+	,	case
+			when b.purchasestatusid in (30003)
+			then 7
+			when b.purchasestatusid in (30001)
+			then 4
+			when 
+				a.purchasestatusid in (30001) and b.purchasestatusid in (30002)
+			then
+				case
+					when af.LastStatusId in (1,4) and af.PaymentAntiFraudClassID = 2 
+					then 9 
+					else 14
+				end
+			when 
+				b.purchasestatusid in (9,4)	and af.LastStatusId in (1,4) and af.PaymentAntiFraudClassID = 2 
+			then 9 
+			when 
+				a.purchasestatusid in (9,4)	and b.purchasestatusid = 30002 and af.LastStatusId in (1,4) and af.PaymentAntiFraudClassID = 2 
+			then 9 
+			when 
+				b.purchasestatusid = 12
+			then 12
+			when b.purchasestatusid in (30002)
+			then 8
+			when b.PurchaseStatusID = 6 and b.historyPaymentMethodID in (6,14,18,5)
+			and c.purchasepaymenthistoryid is null
+			then 3
+			when  b.PurchaseStatusID  in (6)
+			then 5
+			when b.PurchaseStatusID = 1 and b.historyPaymentMethodID in (6,14,18,5)
+			then 5
+			when b.PurchaseStatusID = 4 and b.historyPaymentMethodID in (6,14,18,5)
+			then 8
+			when 
+				b.purchasestatusid in (2,5,9,3,8,10,11)
+			then 1
+		end approvalStatusId
+	from #pphorder b
+	left join #pphorder a
+	on a.purchasepaymentdataid = b.purchasepaymentdataid
+	and a.sortorder = b.sortorder - 1
+	left join #pphorder c
+	on c.purchasepaymentdataid = b.purchasepaymentdataid
+	and c.sortorder = b.sortorder + 1
+	left join  
+	(
+	select 
+		purchasepaymentdataid
+	, 	laststatusid 
+	,	PaymentAntiFraudClassID
+	,	case when rank() over(partition by purchasepaymentdataid order by lastupdate desc) = 1 then 1 else 0 end isLastStatus
+	from ods.PaymentAntiFraud
+	where laststatusid is not null
+	) af
+	on af.PurchasePaymentDataID = b.purchasepaymentdataid
+	and af.isLastStatus = 1
+	and af.LastStatusId in (1,4) and af.PaymentAntiFraudClassID = 2 
+	where b.historypaymentmethodid is not null
+	and b.historypaymentmethodid > 0
+	;
+	
+
+
+delete from reports.approvalhistory;
+
+insert into reports.approvalhistory
+	select 
+		b.purchasepaymenthistoryid 
+ 	,	b.approvalStatusId
+	,	case when a.historypaymentmethodid  = b.historypaymentmethodid and a.approvalStatusId = 8   then 1 else 0 end isRetry
+	,	case when (c.historypaymentmethodid  = b.historypaymentmethodid and c.approvalStatusId in (1,4,7,8)) or b.approvalStatusId not in (1,4,7,8) then 0 else 1 end isFinalResponse
+	,	case when b.approvalStatusId in (1,4,7,8) then 1 else 0 end isGatewayResponse
+	,	case when c.purchasepaymentdataid is null or c.historypaymentmethodid  <> b.historypaymentmethodid then 1 else 0 end isLastResponse
+	,	b.historypaymentmethodid
+	from #pphorderstatus b
+	left join #pphorderstatus a
+	on a.purchasepaymentdataid = b.purchasepaymentdataid
+	and a.sortorder = b.sortorder - 1
+	left join #pphorderstatus c
+	on c.purchasepaymentdataid = b.purchasepaymentdataid
+	and c.sortorder = b.sortorder + 1
+	left join (
+	select 
+		purchasepaymentdataid
+	, 	laststatusid 
+	,	PaymentAntiFraudClassID
+	,	case when rank() over(partition by purchasepaymentdataid order by lastupdate desc) = 1 then 1 else 0 end isLastStatus
+	from ods.PaymentAntiFraud
+	where laststatusid is not null
+	) af
+	on af.PurchasePaymentDataID = b.purchasepaymentdataid
+	and af.isLastStatus = 1
+	and af.LastStatusId in (1,4) and af.PaymentAntiFraudClassID = 2 
+	where b.historypaymentmethodid is not null
+	and b.historypaymentmethodid > 0
+
+	;
+	
+	
+	
+delete from  reports.purchasepaymenthistoryReturnCode
+;
+insert into reports.purchasepaymenthistoryReturnCode
+select 
+	purchasepaymenthistoryid
+,	historypaymentmethodid
+,	case 
+		when charindex(' ', inner_text) > 0
+		then substring(inner_text, 1, charindex(' ', inner_text) - 1)
+		else inner_text
+	end returncode
+,	tagid ruleid
+from
+(
+select 
+	purchasepaymenthistoryid
+,	historypaymentmethodid
+,	trim(replace(replace(substring(originalreturn,charindex( b.opentag,originalreturn) + len(b.opentag),charindex(b.closetag,substring(originalreturn,charindex( b.opentag,originalreturn),1000)) - (len(b.opentag))),'<',''),'/','')) inner_text
+,	tagid
+from ods.purchasepaymenthistory a
+inner join reports.purchasepaymentreturntags b
+on a.originalreturn like'%' + b.opentag + '%'
+where purchasestatusid = 30002
+and originalreturn is not null
+and historypaymentmethodid is not null
+and originalreturn <> '<root></root>'
+)x
+;
+
+delete from reports.ApprovalAttempt;
+
+insert into  reports.ApprovalAttempt
+
+select 
+	a.purchasepaymenthistoryid
+,	a.purchaseid purchasepaymentdataid
+,	a.historypaymentmethodid
+,	approvalstatusid	
+,	case
+		when rank() over(partition by a.purchaseid order by a.purchasepaymenthistoryid) = 1 
+		then 1
+		else 0
+	end isFirstAttempt
+,	x.StatusDate
+from ods.purchasepaymenthistory a
+inner join reports.approvalhistory b
+on a.purchasepaymenthistoryid = b.purchasepaymenthistoryid
+and (b.isfinalresponse = 1 or (b.isLastResponse = 1 and approvalstatusid in(3,5)))
+and a.historypaymentmethodid is not null	
+inner join (
+	select 
+		ppd.purchasepaymentdataid
+	,	min(cast(pur.purchaseinitiated as date)) StatusDate
+	,	sum(pur.totalvalue) totalvalue
+	from ods.purchasepaymentdata ppd
+	inner join ods.purchase pur
+	on ppd.internalreferencenumber = pur.purchaseid
+	group by 1
+) x
+on x.purchasepaymentdataid = a.purchaseid
+
+
+;
+
+delete from reports.GatewayAuthorization;
+
+insert into reports.GatewayAuthorization
+select
+	paymentgatewayid
+,	statusdate
+,	isFirstAttempt
+,	returncode
+,	approvalstatusid
+,	sum(case when approvalstatusid in (4,1) then SubmittedValue else 0 end) authorizedValue
+,	sum(SubmittedValue) submittedValue
+,	sum(case when approvalstatusid not in (3,5) then SubmittedValue else 0 end) processed
+from
+(
+	select 
+		y.historypaymentmethodid
+	,	approvalstatusid 
+	,	statusdate
+	,	isFirstAttempt
+	,	coalesce(rc.returncode,'0') returncode
+	,	sum(totalvalue) SubmittedValue
+	from  reports.ApprovalAttempt y
+	inner join ods.purchasepaymentdata ppd
+	on ppd.purchasepaymentdataid = y.purchasepaymentdataid
+	left join reports.purchasepaymenthistoryReturnCode rc
+	on rc.purchasepaymenthistoryid =y.purchasepaymenthistoryid
+	group by 1,2,3,4,5
+) x
+left join reports.PaymentMethod pm
+on x.historypaymentmethodid = pm.PaymentMethodId
+group by 1,2,3,4,5
+;
+
+delete from reports.GatewayRefusal;
+
+insert into reports.GatewayRefusal
+select
+	paymentgatewayid
+,	statusdate
+,	isFirstAttempt
+,	returncode
+,	approvalstatusid
+,	paymentcreditcardtypeid
+,	sum(SubmittedValue) submittedValue
+from
+(
+	select 
+		y.historypaymentmethodid 
+	,	approvalstatusid 
+	,	statusdate
+	,	isFirstAttempt
+	,	ppd.paymentcreditcardtypeid
+	,	coalesce(rc.returncode,'NID') returncode
+	,	sum(totalvalue) SubmittedValue
+	from  reports.ApprovalAttempt y
+	inner join ods.purchasepaymentdata ppd
+	on ppd.purchasepaymentdataid = y.purchasepaymentdataid
+	left join reports.purchasepaymenthistoryReturnCode rc
+	on rc.purchasepaymenthistoryid =y.purchasepaymenthistoryid
+	where y.approvalstatusid in (7,8)
+	group by 1,2,3,4,5,6
+) x
+left join reports.PaymentMethod pm
+on x.historypaymentmethodid = pm.PaymentMethodId
+group by 1,2,3,4,5,6
+;
+commit
+;

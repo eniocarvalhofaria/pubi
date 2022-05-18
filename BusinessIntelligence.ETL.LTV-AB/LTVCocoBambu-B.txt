@@ -1,0 +1,1 @@
+﻿	sale.CategoryId = 3

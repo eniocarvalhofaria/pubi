@@ -1,0 +1,65 @@
+﻿drop table if exists  #UserAccountActionLogFiltered ;
+
+select  ua.EmailAddress, Replace(ExtraInfo, 'e-mails','emails') ExtraInfo
+into  #UserAccountActionLogFiltered
+from ods.UserAccountActionLog l
+left join
+ods.UserAccount ua
+on ua.UserAccountId = l.UserAccountId
+where extrainfo like '%@%'
+
+;
+
+drop table if exists  reports.UserAccountActionLogEmails ;
+
+select * 
+into reports.UserAccountActionLogEmails 
+from
+(		
+	select  distinct
+		case
+			when IsJason = 1
+			then
+				case
+					when iopenBracket > 0 and icloseBracket > 0
+					then replace(replace(replace(substring(Info,iOpenBracket + 1, iCloseBracket - iOpenBracket - 1),'"',''),'\\\\',','),'\\','')
+					else ''
+				end 
+			else '' 
+		end emails,
+		EmailAddress
+	from
+	(
+		select
+			position( '[' in Info) iopenBracket
+		,	position( ']' in Info) icloseBracket
+		,	Info
+		,	IsJason
+		,	EmailAddress
+
+		from
+		
+		(
+		select 
+			case
+				when position('{' in ExtraInfo) > 0
+				then
+					case
+						when position('emails' in ExtraInfo) > 0
+						then substring(ExtraInfo,position('emails' in ExtraInfo),length(ExtraInfo) - position('emails' in ExtraInfo)) 
+						else null
+					end
+				else ExtraInfo
+			end Info
+		,	case
+				when position('{' in ExtraInfo) > 0
+				then 1
+				else 0
+			end IsJason
+		,	EmailAddress
+		
+		from  #UserAccountActionLogFiltered
+		) x
+ 	) y
+ )z
+ where emails <> ''

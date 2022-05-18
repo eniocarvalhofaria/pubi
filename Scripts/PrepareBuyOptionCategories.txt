@@ -1,0 +1,83 @@
+﻿drop table if exists  #OpCategoriesNames
+;
+create table #OpCategoriesNames
+(
+	BuyOptionId	int
+,	CategoryTypeName varchar(100)
+,	CategoryGroupName varchar(100)
+,	CategoryName varchar(100)
+,	SubCategoryName varchar(100)
+)
+distkey(BuyOptionId)
+sortkey(BuyOptionId)
+;
+insert into #OpCategoriesNames
+select 
+	C_digo_Opcao_N_merico BuyOptionId
+,	coalesce(trim(case when tipo_site_oferta = '' then 'Não especificado' else tipo_site_oferta end),'Não especificado') CategoryTypeName
+,	coalesce(trim(case when categoria_site_oferta = '' then 'Não especificado' else categoria_site_oferta end),'Não especificado') CategoryGroupName
+,	coalesce(trim(case when Subcategoria_Site_Oferta = '' then 'Não especificado' else Subcategoria_Site_Oferta end),'Não especificado') CategoryName
+,	coalesce(trim(case when Sub_Subcategoria_Site_Oferta = '' then 'Não especificado' else Sub_Subcategoria_Site_Oferta end),'Não especificado') SubCategoryName
+
+from salesforce.ctop_es_de_compra 
+
+;
+
+drop table if exists  #BuyOptionCategories
+;
+create table #BuyOptionCategories
+(
+	BuyOptionId	int
+,	CategoryTypeId int
+,	CategoryGroupId int
+,	CategoryId int
+,	SubCategoryId int
+)
+distkey(BuyOptionId)
+sortkey(BuyOptionId)
+;
+
+insert into #BuyOptionCategories
+select 
+	a.BuyOptionId
+,	x.CategoryTypeId
+,	x.CategoryGroupId
+,	x.CategoryId
+,	x.SubCategoryId
+from #OpCategoriesNames a 
+inner join 
+(
+
+select  
+	b.CategoryTypeId
+,	b.Name CategoryTypeName
+,	c.CategoryGroupId
+,	c.Name CategoryGroupName
+,	d.CategoryId
+,	d.Name CategoryName
+,	e.SubCategoryId
+,	e.Name SubCategoryName
+from  reports.cmCategoryType b
+left join reports.cmCategoryGroup c
+on c.CategoryTypeId = b.CategoryTypeId
+left join reports.cmCategory d
+on d.CategoryGroupId = c.CategoryGroupId
+left join reports.cmSubCategory e
+on e.CategoryId = d.CategoryId
+order by 1,2,3,4,5,6,7,8
+) x 
+on 
+	a.CategoryTypeName = x.CategoryTypeName
+and a.CategoryGroupName = x.CategoryGroupName
+and a.CategoryName = x.CategoryName
+and a.SubCategoryName = x.SubCategoryName
+;
+
+truncate table reports.BuyOptionCategories
+;
+insert into reports.BuyOptionCategories
+select * from #BuyOptionCategories
+;
+commit
+;
+

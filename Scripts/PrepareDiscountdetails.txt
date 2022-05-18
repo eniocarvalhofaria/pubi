@@ -1,0 +1,127 @@
+drop table if exists #discountdetails
+;
+CREATE TABLE #discountdetails
+(
+	discountid INTEGER   
+,	c_digo_opcao_n_merico DOUBLE PRECISION   
+,	c_digo_oferta_num_rico DOUBLE PRECISION   
+,	unidade_de_neg_cio VARCHAR(300)   
+,	distrito_conta VARCHAR(300)   
+,	op_cidade_conta VARCHAR(300)   
+,	op_bairro_conta VARCHAR(255)   
+,	condi_o_de_pagamento_oferta VARCHAR(500)   
+,	p_gina_de_publica_o_oferta VARCHAR(500)   
+,	op_id_conta_filial VARCHAR(255)   
+,	op_nome_conta_filial VARCHAR(255)   
+,	id_contrato VARCHAR(500)   
+,	contrato_pu INTEGER   
+,	tipo_site_oferta VARCHAR(500)   
+,	categoria_site_oferta VARCHAR(500)   
+,	subcategoria_site_oferta VARCHAR(500)   
+,	sub_subcategoria_site_oferta VARCHAR(500)   
+,	id_propriet_rio_final VARCHAR(300)   
+,	nome_propriet_rio_final VARCHAR(300)   
+,	id_propriet_rio_guarda_chuva VARCHAR(500)   
+,	nome_propriet_rio_guarda_chuva VARCHAR(500)   
+,	nome_da_opcao_texto VARCHAR(500)   
+,	nome_da_oferta_texto VARCHAR(65535)   
+,	op_t_tulo_da_op_o VARCHAR(65535)   
+,	op_descri_o_da_op_o VARCHAR(65535)   
+,	id_propriet_rio_grow_team VARCHAR(100)   
+,	nome_propriet_rio_grow_team VARCHAR(255)   
+,	projeto VARCHAR(65535)   ENCODE lzo
+,	origem_gteam VARCHAR(65535)   ENCODE lzo
+,	contrato_vinculado_a_adiantamento VARCHAR(65535)
+,	op_quantidade_de_cupons DOUBLE PRECISION   
+)
+DISTSTYLE KEY
+DISTKEY (discountid)
+SORTKEY (
+	discountid
+	, c_digo_opcao_n_merico
+	)
+;
+insert into #discountdetails
+select 
+	rdeals.discountid
+,	op.c_digo_opcao_n_merico
+,	op.c_digo_oferta_num_rico
+,	op.unidade_de_neg_cio
+,	op.distrito_conta
+,	op.op_cidade_conta
+,	op.op_bairro_conta
+,	op.condi_o_de_pagamento_oferta
+,	op.p_gina_de_publica_o_oferta
+,	op.op_id_conta_filial
+,	op.op_nome_conta_filial
+,	op.id_contrato
+,	op.contrato_pu
+,	op.tipo_site_oferta
+,	op.categoria_site_oferta
+,	op.subcategoria_site_oferta
+,	op.sub_subcategoria_site_oferta
+,	op.id_propriet_rio_final
+,	op.nome_propriet_rio_final
+,	op.id_propriet_rio_guarda_chuva
+,	op.nome_propriet_rio_guarda_chuva
+,	op.nome_da_opcao_texto
+,	op.nome_da_oferta_texto
+,	op.op_t_tulo_da_op_o
+,	op.op_descri_o_da_op_o
+,	op.id_propriet_rio_grow_team
+,	op.nome_propriet_rio_grow_team
+,	op.projeto
+,	op.origem_gteam
+,	op.contrato_vinculado_a_adiantamento
+,	op.op_quantidade_de_cupons
+
+from reports.deals rdeals
+inner join reports.opdetails op 
+on rdeals.salesforcebuyingoptionid = op.C_digo_Opcao_N_merico
+;
+insert into #discountdetails
+select 
+	rdeals.discountid
+,  	null C_digo_Opcao_N_merico
+, 	null C_digo_Oferta_Num_rico 
+,	con.unidade_de_neg_cio
+,	con.distrito_conta
+,	con.op_cidade_conta
+,	con.op_bairro_conta
+,	con.condi_o_de_pagamento_oferta
+,	con.p_gina_de_publica_o_oferta
+,	con.op_id_conta_filial
+,	con.op_nome_conta_filial
+,	con.id_contrato
+,	con.contrato_pu
+,	con.tipo_site_oferta
+,	con.categoria_site_oferta
+,	con.subcategoria_site_oferta
+,	con.sub_subcategoria_site_oferta
+,	con.id_propriet_rio_final
+,	con.nome_propriet_rio_final
+,	con.id_propriet_rio_guarda_chuva
+,	con.nome_propriet_rio_guarda_chuva
+,	con.nome_da_opcao_texto
+,	con.nome_da_oferta_texto
+,	con.op_t_tulo_da_op_o
+,	con.op_descri_o_da_op_o
+,	con.id_propriet_rio_grow_team
+,	con.nome_propriet_rio_grow_team
+,	con.projeto
+,	con.origem_gteam
+,	con.contrato_vinculado_a_adiantamento
+,	con.op_quantidade_de_cupons
+
+from reports.deals rdeals 
+inner join reports.contractdetails con 
+on rdeals.salesforcecontractid = con.contrato_pu
+where rdeals.discountid not in (Select discountid from #DiscountDetails)
+;
+
+truncate table reports.discountdetails;
+
+;
+insert into reports.discountdetails
+select * from #discountdetails
+;

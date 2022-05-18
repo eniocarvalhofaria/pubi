@@ -1,0 +1,192 @@
+/************************************************************************************************************************************************************
+ Criado por : Luis Perozin
+ Data criação: 2018-04-01
+ Descrição: Retorna os parceiros OFF de Local(SP,RS) e Travel
+ Área: Planejamento SP
+  Dependências: 
+  reports.dashsales8,  ods.mng_deals_latest, reports.DiscountRevenue,  ods.mng_deals_latest_buying_options_ids, 
+  reports.dm_employee, salesforce.cfaccount, salesforce.sfaccount
+ ************************************************************************************************************************************************************/
+
+
+drop  table  if exists #off;
+select
+ dl.account_name as account_name,
+ dl.account_city,
+ max(case when  (case when dateadd(day,0,bo.start) = '0001-01-01 00:00:00'  then null else dateadd(day,0,bo.start) end)  > dateadd(day,0, dl.publishing_date)
+		               then dateadd(day,0,bo.start) 
+	                   else dateadd(day,0,dl.publishing_date)
+	           end
+	     ) publishing_date,
+max(case when bo."end"  is null or  bo."end"  = '0001-01-01 00:00:00'   then  dateadd(day,0,dl.expiration_date)
+                              when   dateadd(day,0,bo."end")  < dateadd(day,0,dl.expiration_date)  then  dateadd(day,0,dl.expiration_date)  
+                                      else  dateadd(day,0,bo."end") end
+	     ) as expiration_date,          
+	       max(dateadd(day,0,bo."end")) as bo_exp,
+	        max(dateadd(day,0,dl.expiration_date))  as of_exp
+into #off
+from ods.mng_deals_latest  dl
+ left   join ods.mng_deals_latest_buying_options bo on  bo.deal_id = dl.deal_id  and (case when bo."end"  is null or bo."end"  = '0001-01-01 00:00:00'                                                                                                                                   						then '2050-01-01' else bo."end" end  ) <=  dateadd(day,0,current_date-1)                                                                                                                                                   
+where  1 = 1
+and ( dl.account_state in ('SP','RS')  or  	dl.phoenix_type = 'Viagens') 
+and dl.phoenix_type <> 'Produtos'
+and dl.legacydata_unified_discount_id <> 0 
+and not exists (select 1 from reports.dashsales8 ds where ds.id_conta = dl.account_account_id )
+group by 1,2
+having   max(case when bo."end"  is null or  bo."end"  = '0001-01-01 00:00:00'   then  dateadd(day,0,dl.expiration_date)
+	                              when   dateadd(day,0,bo."end")  < dateadd(day,0,dl.expiration_date)  then  dateadd(day,0,dl.expiration_date)  
+	                                      else  dateadd(day,0,bo."end") end
+	            ) <= dateadd(day,0,getdate() - 1);
+
+
+drop  table  if exists #deals_latest_last_version;
+
+select 
+             dl.legacydata_unified_discount_id,
+             dl.account_account_id,
+             dl.account_name,
+             dl.publishing_date,
+			 dl.expiration_date  ,
+			 dl.phoenix_category,
+			 dl.category,
+		     dl.account_city,
+		     dl.account_state
+            into #deals_latest_last_version
+from (             
+select   dl.legacydata_unified_discount_id,
+             dl.account_account_id,
+             dl.account_name,
+             dl.publishing_date,
+		     dl.expiration_date,
+			 dl.phoenix_category,
+		     dl.category,
+		     dl.account_city,
+		     dl.account_state,
+             dense_rank() over (partition by  dl.account_account_id order by dl.publishing_date desc, dl.expiration_date desc, dl.lastmodified desc ,dl.legacydata_unified_discount_id desc) crank
+from #off x
+inner join ods.mng_deals_latest dl  on dl.account_name = x.account_name
+where 1= 1
+and ( dl.account_state in ('SP','RS')  or  	dl.phoenix_type = 'Viagens')  
+ and dl.phoenix_type <> 'Produtos'
+and dl.phoenix_type <> ''
+and dateadd(day,0,dl.expiration_date) <= cast(getdate()-1 as date) 
+and dateadd(day,0,dl.publishing_date)  <= cast(getdate()-1 as date) 
+and not exists (select 1 from reports.dashsales8 ds where ds.id_conta = dl.account_account_id and ds.dt_evento>= cast(getdate()-1 as date) )
+) dl where dl.crank = 1;
+
+
+drop  table  if exists #dealsoff;
+
+select   dv.account_name
+            ,dv.account_account_id  
+			,min(dv.publishing_date)   as first_publishing_start
+			,max(dv.publishing_date)  as last_publishing_start
+			,max(dv.expiration_date)   as publishing_end
+		 into #dealsoff
+from #deals_latest_last_version dv
+where 1 = 1
+group by 1,2
+having max(dateadd(day,0,dv.publishing_date)) <= cast(getdate()-1 as date) 
+and  max(dateadd(day,0,dv.expiration_date)) <= cast(getdate()-1 as date);
+
+
+
+/*Criando a DM account*/
+drop  table  if exists #dm_account;
+
+select 
+        sc.account_name as sc,
+		id_conta as account_id,
+		 coalesce(b.name,a.nome_de_exibi_o) as account_name,
+		cnpj as vat,
+		coalesce(b.name,sc.account_name) as account_name2,
+		left(b.createddate,10) as date_created,
+		right(b.createddate,10) as time_created,
+		b.isdeleted,
+		left(b.lastmodifieddate,10) as date_last_modified,
+		right(b.lastmodifieddate,10) as time_last_modified,
+		a.e_mail as email,
+		a.atividade_econ_mica as economic_activity,
+		a.uf as Estate,
+		a.cidade as city_name,
+		a.cidade_obj as city_code,
+		b.phone as phone_number,
+		a.cep as zipcode,
+		a.status_conta as account_status,
+		a.propriet_rio_compartilhado_farmer as proprietario_farmer,
+		a.propriet_rio_compartilhado as proprietario,
+        a.conta_sem_hunter, 
+        a.conta_sem_farmer,
+        a.conta_sem_propriet_rio_compartilhado as conta_sem_proprietario_compartilhado,
+		b.industry as category,
+		sc.first_publishing_start as first_publishing_start,
+		sc.last_publishing_start as last_publishing_start,
+		sc.publishing_end as publishing_end
+   into #dm_account
+ from #dealsoff sc
+    inner  join salesforce.cfaccount a on a.id_conta = sc.account_account_id
+    left  join salesforce.sfaccount b on a.id_conta = b.id 
+where 1 = 1
+;
+
+
+/*Carga da carteira_off;*/
+drop  table  if exists reports.carteira_off;
+
+select
+        cast(getdate() as date) as load_date,
+		ac.account_id,
+	--	dl.phoenix_category,
+		coalesce(ac.account_name2,ac.account_name)  as account_name,
+		isnull(ac.category,dl.category) as category,
+		isnull(ac.city_name,dl.account_city) as city_name,
+		isnull(ac.Estate,dl.account_state) as Estate,
+		emf.name as name_compartilhado_farmer,
+		emf.sales_team as salesteam_compartilhado_farmer,
+		emh.name as name_compartilhado,
+		emh.sales_team as salesteam_compartilhado_hunter,
+		ac.first_publishing_start,
+		ac.last_publishing_start,
+		ac.publishing_end,
+		datediff(day,ac.publishing_end , current_date) as qty_days_off,
+		CAST(sum(case when   dr.eventdate between dateadd(day,-90,ac.publishing_end) and ac.publishing_end   
+		                          then  coalesce(dr.grosssalespucommission,0) + coalesce(dr.administrativefee,0) -  coalesce(dr.cancelledprebillingpu,0) - coalesce(dr.cancelledposbillingpu,0) 
+		 						  else 0 end ) AS FLOAT) as Receita_Comercial_Last90d,
+		CAST(sum(case when   dr.eventdate between dateadd(day,-90,ac.publishing_end) and ac.publishing_end   
+		                          then coalesce(dr.grosssales, 0) + coalesce(dr.financecharge, 0) + coalesce(dr.extrafees, 0)
+		                           else 0 end ) AS FLOAT)  as GMV_Last90d,
+	   CAST(sum(case when   dr.eventdate between dateadd(day,-90,ac.publishing_end) and ac.publishing_end   
+		                          then  ( coalesce(grosssalespucommission,0) + 
+											   coalesce(dr.administrativefee,0) + 
+												coalesce(dr.financecharge,0) + 
+												coalesce(dr.extrafeespu,0) +
+												coalesce(dr.noshow,0))
+												-
+												(coalesce(dr.cancelledprebillingpu,0) +
+												coalesce(dr.cancelledposbillingpu,0) +
+												coalesce(dr.cancellationfinancecharge,0) +
+												coalesce(dr.cancellationextrafeespu,0) +
+												coalesce(dr.administrativefeecancelled,0))
+												-
+												(coalesce(dr.aquirerfee,0) +
+												coalesce(dr.anticipationcost,0) +
+												coalesce(dr.antifraudfee,0) +
+												coalesce(dr.promocodes,0))
+												+
+												coalesce(dr.cancellationpromocodes,0)
+		                            else 0 end ) AS FLOAT)  as  Lucro_Bruto_last90d
+		                            into reports.carteira_off
+from 	#dm_account ac
+inner join #deals_latest_last_version dl (nolock)   on ac.account_id = dl.account_account_id
+   left join reports.discountrevenue dr (nolock) on dl.legacydata_unified_discount_id=dr.unifieddiscountid
+   left join reports.dm_employee emf on  emf.employee_sf_code =  ac.proprietario_farmer
+   left join reports.dm_employee emh on  emh.employee_sf_code =  ac.proprietario
+where 1 = 1 
+group by 1,2,3,4,5,6,7,8,9,10,11,12,13,14;
+
+grant all on reports.carteira_off to group bi_group;
+grant all on reports.carteira_off to group bi_group_r;
+
+
+
+

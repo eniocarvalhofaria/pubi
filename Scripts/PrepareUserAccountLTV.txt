@@ -1,0 +1,318 @@
+drop table if exists #purchaseOrder
+;
+select 
+	PurchaseId
+,	s.useraccountid
+,	case when SourceId = 2 or OSAccessCode between 2 and 6 or httpreferrer like '%OS: android%' or httpreferrer like '%OS: ios%' then 2 else 1 end SourceId
+,	s.unifiedDiscountId
+,	grossSales
+,	grossSales - promocodes AmountSpent
+,	grossrevenue 
+,	((grossrevenue ) - promocodes) GrossRevenueMinusPromocode
+,	promocodes
+,	coalesce(CancellationLoss,0) CancellationLoss
+,	grossrevenue - coalesce(CancellationLoss,0) NetRevenue
+,	grossrevenue - coalesce(CancellationLoss,0) - case when  CancellationLoss > 0 then 0 else  coalesce(promocodes,0)  end NetRevenueMinusPromocode
+,	EventDate
+,	left(EventDate::text, 7) 
+,	min(EventDate) over(partition by s.useraccountid) ActivationDate
+,	rank() over(partition by s.useraccountid order by s.PurchaseInitiated asc,s.PurchaseId asc) PurchaseOrder
+,	s.salespageid
+into #purchaseOrder
+from ods.Sales s
+left join 
+(
+	select 
+		PurchaseId CancelledPurchaseId
+	,	sum(cancelledpucommission + case when iscancelledcouponpaidbypu = 1 then cancelledamounttopartner else 0 end) CancellationLoss
+	from ods.Cancellations
+	group by 1
+) can
+on s.purchaseid = can.CancelledPurchaseId
+where Type = 1
+;
+
+drop table if exists #UserAccountLifeCycle
+;
+create table #UserAccountLifeCycle
+(
+	UserAccountId int 
+,	PurchaseOrder int 
+,	PurchaseId int 
+,	LifeCycleNumber int
+,	LTVCycleType int 
+,	ActivationDate date
+,	CyclePurchaseOrder int
+)
+distkey (UserAccountId)
+;
+
+
+insert into #UserAccountLifeCycle
+select 
+	b.useraccountid
+,	b.purchaseorder
+,	b.PurchaseId
+,	rank() over (partition by b.useraccountid,c.months order by b.purchaseorder) LifeCycleNumber
+,	c.months
+,	b.EventDate ActivationDate
+,	1
+from #purchaseOrder b 
+inner join reports.LTVCycleType c 
+on b.useraccountid = b.useraccountid
+left join #purchaseOrder a 
+on b.UserAccountId = a.UserAccountId 
+and b.purchaseOrder = a.purchaseOrder + 1
+where datediff(day,a.EventDate, b.EventDate) > c.days or a.EventDate is null
+;
+
+insert into #UserAccountLifeCycle
+select 
+	c.useraccountid
+,	c.purchaseorder
+,	c.PurchaseId
+,	a.LifeCycleNumber
+,	a.ltvcycletype
+,	a.ActivationDate
+,	(c.purchaseorder - a.purchaseorder) + 1
+from #UserAccountLifeCycle a
+inner join #purchaseOrder c
+on c.UserAccountId = a.UserAccountId 
+and c.purchaseOrder > a.purchaseOrder
+left join #UserAccountLifeCycle b
+on b.UserAccountId = a.UserAccountId 
+and b.LifeCycleNumber = a.LifeCycleNumber + 1
+and b.ltvcycletype = a.ltvcycletype
+where (c.purchaseOrder < b.purchaseOrder or b.purchaseOrder is null)
+;
+truncate table reports.UserAccountLifeCycle
+;
+
+insert into reports.UserAccountLifeCycle
+select * from #UserAccountLifeCycle
+;
+
+drop table if exists #ltvDates
+;
+
+	select 
+		a.months CycleType
+	,	a.days
+	,	cast(dateadd(day, ((days + 1) * -1),cast(getdate() as date)) as date) limitDate 	
+	,	c.date activationDate 
+	,	d.date startSaleDate
+	,	cast(dateadd(day,29,d.date) as date) endSaleDate
+	,	(datediff(day,c.date,d.date) / 30) + 1 months
+	into #ltvDates
+	from  reports.LTVCycleType a
+	inner join reports.currentcalendar c
+	on c."date" > cast(dateadd(day, ((days + 1 + 30) * -1),cast(getdate() as date)) as date)
+	and c.date < cast(getdate() as date)
+	inner join reports.currentcalendar d
+	on d."date" between c.date and cast(dateadd(day, a.days ,c.date) as date)
+	where datediff(day,c.date,d.date) % 30 = 0
+	and cast(dateadd(day,30,d.date) as date) < cast(getdate() as date)
+	order by 1,2,3,4,5
+;
+drop table if exists #qtyUsers
+;
+	
+SELECT
+	cycletype
+,	maxmonth
+,	sum(qty) over(partition by cycletype order by cycletype, maxmonth desc rows unbounded preceding) qty
+into #qtyUsers
+from 
+(
+select 
+	cycletype
+,	maxmonth	
+,	sum(qty) qty
+from 
+(
+	select 
+		cycletype
+	,	d.ActivationDate	
+	,	qty
+	,	maxMonth 
+	from 
+	(select  cycletype,activationDate, max(months) maxMonth from #ltvDates group by 1,2) d 
+	inner join (select distinct activationDate, count(distinct UserAccountId) qty from #purchaseorder group by 1) p 
+	on p.activationDate = d.activationDate
+) x	
+group BY 1,2
+) a
+
+;
+drop table if exists #agspu
+;
+
+
+select 
+	s.cycletype
+,	s.months
+,	s.grosssales
+,	u.qty
+,	s.grosssales/u.qty AGSPU
+into #agspu
+from 
+(
+select 
+	l.cycletype
+,	l.months
+,	sum(grossSales) grosssales
+from #ltvDates l
+inner join #purchaseOrder p 
+on p.ActivationDate = l.activationDate
+and p.eventdate between l.startSaleDate and l.endSaleDate
+group by 1,2
+) s 
+inner join #qtyUsers u 
+on u.maxmonth = s.months
+and s.cycletype = u.cycletype
+order by 2,1
+;
+drop table if exists #curve
+;
+
+select 
+	a.cycleType
+,	a.months
+,	a.agspu/ t.agspuTotal monthPerc
+,	sum(a.agspu/ t.agspuTotal ) over(partition by a.cycleType order by a.months  rows unbounded preceding) accumPerc
+into #curve
+from #agspu a 
+inner join
+	(
+	select 
+		cycletype
+	,	sum(AGSPU) agspuTotal
+	from #agspu
+	group by 1
+	) t 
+on
+a.cycletype = t.cycletype
+order by 1,2
+;
+update #curve
+set monthPerc = monthPerc + ( 1 - accumPerc)
+,	accumPerc = 1
+where months = cycleType
+
+;
+
+
+
+
+
+	drop table if exists #UserAccountLTV
+;
+CREATE TABLE #UserAccountLTV
+(
+	"useraccountid" INTEGER   ENCODE lzo
+	,"activationdate" DATE   ENCODE lzo
+	,"lifecyclenumber" INTEGER   ENCODE lzo
+	,"ltvcycletype" INTEGER   ENCODE lzo
+	,"monthscompleted" BIGINT   ENCODE lzo
+	,"activationpurchaseid" INTEGER   ENCODE lzo
+	,"lastpurchasedate" DATE   ENCODE lzo
+	,"lastpurchaseid" INTEGER   ENCODE lzo
+	,"isactivatedbymobile" BIGINT   ENCODE lzo
+	,"isactivatedbypromocode" BIGINT   ENCODE lzo
+	,"activationunifieddiscountid" INTEGER   ENCODE lzo
+	,"grosssalestotal" NUMERIC(38,2)   ENCODE lzo
+	,"grossrevenuetotal" NUMERIC(38,10)   ENCODE lzo
+	,"grossrevenueminuspromocodetotal" NUMERIC(38,10)   ENCODE lzo
+	,"cancellationlosstotal" NUMERIC(38,2)   ENCODE lzo
+	,"netrevenuetotal" NUMERIC(38,10)   ENCODE lzo
+	,"netrevenueminuspromocodetotal" NUMERIC(38,10)   ENCODE lzo
+	,"grosssalesfirstpurchase" NUMERIC(38,2)   ENCODE lzo
+	,"grossrevenuefirstpurchase" NUMERIC(38,10)   ENCODE lzo
+	,"grossrevenueminuspromocodefirstpurchase" NUMERIC(38,10)   ENCODE lzo
+	,"cancellationlossfirstpurchase" NUMERIC(38,2)   ENCODE lzo
+	,"netrevenuefirstpurchase" NUMERIC(38,10)   ENCODE lzo
+	,"netrevenueminuspromocodefirstpurchase" NUMERIC(38,10)   ENCODE lzo
+	,"grosssalesreal" NUMERIC(38,2)   ENCODE lzo
+	,"grossrevenuereal" NUMERIC(38,10)   ENCODE lzo
+	,"grossrevenueminuspromocodereal" NUMERIC(38,10)   ENCODE lzo
+	,"cancellationlossreal" NUMERIC(38,2)   ENCODE lzo
+	,"netrevenuereal" NUMERIC(38,10)   ENCODE lzo
+	,"netrevenueminuspromocodereal" NUMERIC(38,10)   ENCODE lzo
+	,"grosssalesest" NUMERIC(38,4)   ENCODE lzo
+	,"grossrevenuerealest" NUMERIC(38,6)   ENCODE lzo
+	,"grossrevenueminuspromocodeest" NUMERIC(38,6)   ENCODE lzo
+	,"cancellationlossest" NUMERIC(38,4)   ENCODE lzo
+	,"netrevenueest" NUMERIC(38,6)   ENCODE lzo
+	,"netrevenueminuspromocodeest" NUMERIC(38,6)   ENCODE lzo
+	,"estimativefactor" NUMERIC(38,4)   ENCODE lzo
+	,"durationoflifeinmonths" BIGINT   ENCODE lzo
+	,"monthsinltvcalc" BIGINT   ENCODE lzo
+	,"iscyclealive" INTEGER   ENCODE lzo
+)
+distkey (useraccountid)
+sortkey (useraccountid)
+;
+	insert into  #UserAccountLTV
+	select 
+		x.*
+	,	GrossSalesReal / coalesce(accumPerc,1) GrossSalesEst
+	,	GrossRevenueReal  / coalesce(accumPerc,1) GrossRevenueRealEst
+	,	GrossRevenueMinusPromocodeReal  / coalesce(accumPerc,1) GrossRevenueMinusPromocodeEst
+	,	CancellationLossReal  / coalesce(accumPerc,1) CancellationLossEst
+	,	NetRevenueReal  / coalesce(accumPerc,1) NetRevenueEst
+	,	NetRevenueMinusPromocodeReal  / coalesce(accumPerc,1) NetRevenueMinusPromocodeEst
+	,	coalesce(accumPerc,1) EstimativeFactor
+	,	datediff(month,ActivationDate,LastPurchaseDate) DurationOfLifeInMonths
+	,	case when x.monthsCompleted > x.LTVCycleType then x.LTVCycleType else x.monthsCompleted end monthsInLtvCalc
+	,	case when datediff(month,LastPurchaseDate,dateadd(day,-1,cast(getdate() as date))) >= x.LTVCycleType then 0 else 1 end isCycleAlive
+	
+	from 
+		(
+		select
+			p.UserAccountID
+		,	l.ActivationDate
+		,	l.LifeCycleNumber
+		,	l.LTVCycleType
+		,	datediff(month,l.ActivationDate,dateadd(day,-1,cast(getdate() as date))) +  1 monthsCompleted
+		,	min(l.purchaseid) ActivationPurchaseId
+		,	max(EventDate) LastPurchaseDate
+		,	max(l.purchaseid) LastPurchaseId
+		,	sum(case when cyclePurchaseOrder = 1 and sourceid = 2 then 1 else 0 end) isActivatedByMobile
+		,	sum(case when cyclePurchaseOrder = 1 and Promocodes > 0 then 1 else 0 end) isActivatedByPromocode
+		,	max(case when cyclePurchaseOrder = 1 then unifiedDiscountId else 0 end) ActivationUnifiedDiscountId
+		,	sum(GrossSales) GrossSalesTotal
+		,	sum(GrossRevenue) GrossRevenueTotal
+		,	sum(GrossRevenueMinusPromocode) GrossRevenueMinusPromocodeTotal
+		,	sum(CancellationLoss) CancellationLossTotal
+		,	sum(NetRevenue) NetRevenueTotal
+		,	sum(NetRevenueMinusPromocode) NetRevenueMinusPromocodeTotal
+		,	sum(case when cyclePurchaseOrder = 1 then GrossSales else 0 end ) GrossSalesFirstPurchase
+		,	sum(case when cyclePurchaseOrder = 1 then GrossRevenue else 0 end ) GrossRevenueFirstPurchase
+		,	sum(case when cyclePurchaseOrder = 1 then GrossRevenueMinusPromocode else 0 end ) GrossRevenueMinusPromocodeFirstPurchase
+		,	sum(case when cyclePurchaseOrder = 1 then CancellationLoss else 0 end ) CancellationLossFirstPurchase
+		,	sum(case when cyclePurchaseOrder = 1 then NetRevenue else 0 end ) NetRevenueFirstPurchase
+		,	sum(case when cyclePurchaseOrder = 1 then NetRevenueMinusPromocode else 0 end ) NetRevenueMinusPromocodeFirstPurchase
+		,	sum(case when datediff(month,l.ActivationDate,EventDate) < l.LTVCycleType then GrossSales else 0 end ) GrossSalesReal
+		,	sum(case when datediff(month,l.ActivationDate,EventDate) < l.LTVCycleType then GrossRevenue else 0 end ) GrossRevenueReal
+		,	sum(case when datediff(month,l.ActivationDate,EventDate) < l.LTVCycleType then GrossRevenueMinusPromocode else 0 end ) GrossRevenueMinusPromocodeReal
+		,	sum(case when datediff(month,l.ActivationDate,EventDate) < l.LTVCycleType then CancellationLoss else 0 end ) CancellationLossReal
+		,	sum(case when datediff(month,l.ActivationDate,EventDate) < l.LTVCycleType then NetRevenue else 0 end ) NetRevenueReal
+		,	sum(case when datediff(month,l.ActivationDate,EventDate) < l.LTVCycleType then NetRevenueMinusPromocode else 0 end ) NetRevenueMinusPromocodeReal
+		from #PurchaseOrder p
+		inner join  #UserAccountLifeCycle l 
+		on p.userAccountId = l.userAccountId
+		and p.purchaseId = l.purchaseId
+		group by 1,2,3,4
+		) x
+		left join #curve c 
+		on x.LTVCycleType = c.cycleType
+		and  x.monthsCompleted = c.months
+		
+		
+;
+
+truncate table  reports.UserAccountLTV
+;
+insert into  reports.UserAccountLTV
+select * from #UserAccountLTV
+;

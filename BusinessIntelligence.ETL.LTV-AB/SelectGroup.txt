@@ -1,0 +1,37 @@
+﻿
+insert into #ltvUsersAnalysis
+select 
+		userAccountId
+	,	userAccountPurchaseClass
+	,	PurchaseOrder
+	,	userTypeName
+	,	testName
+	,	yearMonth
+	,	isUserAccountUnified
+	,	eventDate
+	from 
+	(
+		select 
+			sale.userAccountId
+		,	case
+				when previousSale.UserAccountId is null then 'Ativação'
+				when datediff(day,previoussale.EventDate,sale.EventDate) > 30 then 'Reativação'
+				else 'Comprador ativo'
+		end userAccountPurchaseClass
+	,	sale.PurchaseOrder
+	,	'<@usertypename@>' userTypeName
+	,	'<@testname@>' testName
+	,	left(sale.EventDate::text, 7) yearMonth
+	,	rank() over (partition by sale.UserAccountId, sale.isUserAccountUnified order by sale.PurchaseOrder) SortOrder
+	,	sale.isUserAccountUnified
+	,	sale.eventDate
+	from reports.PurchaseOrder sale
+	left join reports.PurchaseOrder previousSale
+	on sale.UserAccountID = previoussale.userAccountId
+	and sale.PurchaseOrder -1 = previoussale.PurchaseOrder
+	and sale.isUserAccountUnified = previoussale.isUserAccountUnified
+	<@exclusioncriterial@>
+	<@criterialtext@>
+	
+	) y
+	where SortOrder = 1 

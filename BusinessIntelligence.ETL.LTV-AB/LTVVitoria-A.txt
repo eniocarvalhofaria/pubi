@@ -1,0 +1,1 @@
+﻿			( sale.salespageid = 16 and sale.PurchaseOrder = 1 and sale.EventDate >= '2015-06-01' and sale.CategoryId not in (1,10))

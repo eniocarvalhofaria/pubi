@@ -1,0 +1,602 @@
+-----------------------------------------------------------------------------------------------------------
+-- TMC Lite - Year
+-----------------------------------------------------------------------------------------------------------
+drop table if exists reports.tmc_lite_01_year;
+
+create table reports.tmc_lite_01_year 
+distkey(month)
+sortkey(year_month_date)
+as
+select 
+	cast(left(dcr.eventdate, 7) + '-01' as date) as year_month_date
+	,dcr.eventyear as year
+	,dcr.eventmonth as month
+	,case
+		when date_part(w, dcr.eventdate + 1) >= 51 and 
+							case
+								when extract(doy from dcr.eventdate) between 365 and 366 then extract(doy from dcr.eventdate)
+								else extract(doy from dcr.eventdate + 1)
+							end < 8
+ 		then 1 else date_part(w, dcr.eventdate + 1)
+ 	end week number
+	,dcr.ownererp as owner
+	,dcr.coordinator as manager
+	,dcr.manager as regional director
+	,dcr.region as account region
+	,dcr.team as team
+	,dcr.accountid as account
+	,dcr.accountname as account name
+	,acc.cnpj as cnpj
+	,dcr.idoferta as of
+	,dcr.purchaseoption as op
+	,dcr.categoryname as category
+	,dcr.category_site as category site
+	,dcr.subcategory_site as subcategory site
+	,dcr.subsubcategory_site as subsubcategory site
+	,acc.atividade_economica as economic activity
+	,dcr.paymentconditionname as payment condition
+	,dcr.paymentcondition as payment type
+	,acc.accountcity as account_city
+	,acc.state as account_state
+	,acc.neighborhood as account_neighborhood
+	,case 
+	   when dcr.channelid in (1) then 'Peixe Urbano'
+	   when dcr.channelid in (6) then 'Groupon'
+  	end Marca
+  	,oft.of_p_gina_de_publica_o as pagina
+	,sum(dcr.qtycoupons) AS qtycoupons
+	,sum(dcr.sharedservicepercent * dcr.grosssales) AS grosssales
+	,sum(dcr.sharedservicepercent * dcr.grosssalespucommission) AS grosssalespucommission
+	,sum(dcr.sharedservicepercent * dcr.ROL) AS ROL
+	,sum(dcr.sharedservicepercent * dcr.GMV) AS GMV
+	,sum(dcr.sharedservicepercent * dcr.GrossProfit) AS grossprofit
+	,sum(dcr.sharedservicepercent * dcr.noshow) noshow
+	,sum(dcr.sharedservicepercent * dcr.cancelledprebillingpu) cancelledprebillingpu
+	,sum(dcr.sharedservicepercent * dcr.cancelledposbillingpu) cancelledposbillingpu
+	,sum(dcr.sharedservicepercent * dcr.aquirerfee) aquirerfee
+	,sum(dcr.sharedservicepercent * dcr.anticipationcost) anticipationcost
+	,sum(dcr.sharedservicepercent * dcr.antifraudfee) antifraudfee
+	,sum(dcr.sharedservicepercent * dcr.promocodes) promocodes
+	,sum(dcr.sharedservicepercent * dcr.grosssalespucommission) receita_ofertas
+	,sum(dcr.sharedservicepercent * dcr.administrativefee) admnistrativefee
+	,sum(dcr.sharedservicepercent * dcr.administrativefeecancelled) administrativefeecancelled
+	-- indicadores referentes aos parceiros novos, validos por 90 dias
+	,sum(dcr.sharedservicepercent * dcr.newgrossrevenue) AS newgrossrevenue
+	,sum(dcr.sharedservicepercent * dcr.newgrossprofit) AS newgrossprofit
+	,sum(dcr.sharedservicepercent * (dcr.grosssalespucommission + dcr.administrativefee - dcr.commercialcancelledposbilling - dcr.cancelledprebillingpu)) AS receita_comercial
+from reports.com_finance_actual_history_changes dcr
+left join reports.com_account acc on dcr.accountid = acc.accountid
+left join salesforce.ctOfertas oft on dcr.idoferta = oft.name
+where 1 = 1
+	and dcr.eventdate between left(dateadd(month, -13, getdate() - 1), 7) + '-01' and cast(getdate() - 1 as date)
+group by 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26;
+
+analyze reports.tmc_lite_01_year;
+
+grant all on reports.tmc_lite_01_year to group bi_group;
+grant all on reports.tmc_lite_01_year to group bi_group_r;
+
+-----------------------------------------------------------------------------------------------------------
+-- TMC Lite - 7 months
+-----------------------------------------------------------------------------------------------------------
+drop table if exists reports.tmc_lite_01;
+
+select 
+	dcr.year
+	,dcr.month
+	,dcr.week number
+	,dcr.owner
+	,dcr.manager
+	,dcr.regional director
+	,dcr.account region
+	,dcr.team
+	,dcr.account
+	,dcr.account name
+	,dcr.cnpj
+	,dcr.of
+	,dcr.op
+	,dcr.category
+	,dcr.category site
+	,dcr.subcategory site
+	,dcr.subsubcategory site
+	,dcr.economic activity
+	,dcr.payment condition
+	,dcr.payment type
+	,dcr.account_city
+	,dcr.account_state
+	,dcr.account_neighborhood
+	,dcr.Marca
+	,dcr.pagina
+	,dcr.qtycoupons
+	,dcr.grosssales
+	,dcr.grosssalespucommission
+	,dcr.ROL
+	,dcr.GMV
+	,dcr.grossprofit
+	,dcr.noshow
+	,dcr.cancelledprebillingpu
+	,dcr.cancelledposbillingpu
+	,dcr.aquirerfee
+	,dcr.anticipationcost
+	,dcr.antifraudfee
+	,dcr.promocodes
+	,dcr.receita_ofertas
+	,dcr.admnistrativefee
+	,dcr.administrativefeecancelled
+	-- indicadores referentes aos parceiros novos, validos por 90 dias
+	,dcr.newgrossrevenue
+	,dcr.newgrossprofit
+	,dcr.receita_comercial
+into reports.tmc_lite_01
+from reports.tmc_lite_01_year dcr
+where 1 = 1
+	and dcr.year_month_date between left(dateadd(month, -7, getdate() - 1), 7) + '-01' and cast(getdate() - 1 as date);
+
+analyze reports.tmc_lite_01;
+
+grant all on reports.tmc_lite_01 to group bi_group;
+grant all on reports.tmc_lite_01 to group bi_group_r;
+
+-----------------------------------------------------------------------------------------------------------
+-- TMC Lite - Recent Owner
+-----------------------------------------------------------------------------------------------------------
+-----------------------------------------------------------------------------
+-- Multiplying records on accounts with shared services
+-- Later calculations will be easier to do (less union queries)
+-----------------------------------------------------------------------------
+drop table if exists #account_owner;
+
+select distinct *
+into #account_owner
+from (
+	-- Proprietarios espelhados
+	select 
+		acc.accountid, 
+		acc.sharedserviceowner as ownerid,
+		'Mirrored Shared' as owner_source,
+		cast(acc.sharedservicepercent/100.0 as decimal(10,3)) as sharedservicepercent
+	from reports.com_account acc (nolock)
+	where sharedserviceowner <> ''
+	-------------
+	union
+	-------------
+	-- Owners das contas com shared service
+	select 
+		acc.accountid, 
+		acc.proprietario_compartilhado as ownerid,
+		'Mirrored Owner' as owner_source,
+		cast((100 - acc.sharedservicepercent)/100.0 as decimal(10,3)) as sharedservicepercent
+	from reports.com_account acc (nolock)
+	where sharedserviceowner <> ''
+	-------------
+	union
+	-------------
+	-- Contas sem shared service - Proprietario Compartilhado
+	select 
+		acc.accountid, 
+		acc.proprietario_compartilhado as ownerid,
+		'Shared Owner' as owner_source,
+		null as sharedservicepercent
+	from reports.com_account acc (nolock)
+	where 1 = 1
+		and (acc.sharedserviceowner = '' or acc.sharedserviceowner is null)
+		and acc.proprietario_compartilhado <> ''
+	-------------
+	union
+	-------------
+	-- Contas sem shared service - Proprietario Compartilhado Farmer
+	select 
+		acc.accountid, 
+		acc.proprietario_compartilhado_farmer as ownerid,
+		'Shared Owner Farmer' as owner_source,
+		null as sharedservicepercent
+	from reports.com_account acc (nolock)
+	where 1 = 1
+		and (acc.sharedserviceowner = '' or acc.sharedserviceowner is null)
+		and acc.proprietario_compartilhado_farmer <> ''
+);
+
+drop table if exists #newpartner_last_date;
+
+select 
+	np.accountid, 
+	np.accountname, 
+	max(np.date_as_newpartner) date_as_newpartner, 
+	np.isnewpartner
+into #newpartner_last_date
+from reports.newpartner np
+group by 1, 2, 4;
+
+drop table if exists #tmp_discount_revenue;
+
+/* DiscountRevenue copy for increase performance */
+create table #tmp_discount_revenue sortkey(eventdate, unifieddiscountid, discountid) as 
+select
+	 	dr.EventDate
+	,	dr.discountid
+	,	dr.unifieddiscountid
+	,	case 
+			when dr.channelid in (1) then 'Peixe Urbano'
+			when dr.channelid in (6) then 'Groupon'
+		end Marca
+	,	sum(dr.qtycoupons) qtycoupons
+	,	sum(dr.grosssales) grosssales
+	,	sum(dr.grosssalespucommission) grosssalespucommission
+	,	sum(dr.grossrevenue) grossrevenue
+	,	sum(dr.administrativefee) administrativefee
+	,   sum(dr.grosssales + dr.extrafees + dr.financecharge) GMV
+	,   sum((dr.grosssalespucommission + dr.NoShow + dr.financecharge + dr.extrafeespu + dr.administrativefee) - 
+		   (dr.CancelledPreBillingPU + dr.cancelledposbillingpu + dr.cancellationextrafeespu + dr.cancellationfinancecharge + dr.administrativefeecancelled)) ROL
+	,   sum((dr.grosssalespucommission + dr.NoShow + dr.financecharge + dr.extrafeespu + dr.administrativefee) - 
+		   (dr.CancelledPreBillingPU + dr.cancelledposbillingpu + dr.cancellationextrafeespu + dr.cancellationfinancecharge + dr.administrativefeecancelled) -
+		   (dr.aquirerfee + dr.antifraudfee + dr.promocodes + dr.anticipationcost - dr.cancellationpromocodes)) grossprofit
+	,	sum(dr.grosssalespucommission + dr.administrativefee - dr.cancelledprebillingpu - dr.cancelledposbilling) receita_comercial
+from reports.DiscountRevenue dr (nolock)
+where 1 = 1
+	and dr.eventdate between left(dateadd(month, -13, getdate() - 1), 7) + '-01' and cast(getdate() - 1 as date)
+	and (dr.grosssales <> 0
+		or dr.aquirerfee <> 0
+		or dr.antifraudfee <> 0
+		or dr.anticipationcost <> 0
+		or dr.promocodes <> 0
+		or dr.noshow <> 0
+		or dr.cancelledprebilling <> 0
+		or dr.cancelledposbilling <> 0
+		or dr.cancellationpromocodes <> 0)
+group by 1, 2, 3, 4;
+
+analyze #tmp_discount_revenue;
+
+drop table if exists #tmp_tmc_recent_owner_new;
+
+create table #tmp_tmc_recent_owner_new sortkey(eventdate, discountid, accountid, sk_employee) as 
+select
+	 	dr.EventDate
+	,	dr.discountid
+	,	dr.unifieddiscountid
+	,	dis.IdOpcaoDeCompra
+	,	coalesce(offer.id, offer2.id) offer_id
+	,	udis.ContractId
+	,	ac.accountid
+	,	coalesce(
+			case when em_off.sales_team = 'Key Account (E-commerce)' or em_acc.sales_team = 'Key Account (E-commerce)'
+				then em_off.sk_employee
+				else
+					case when ac.iscalculatedbycontract = 1 and em_acc.sales_team not like 'Sao Paulo%' and em_acc.sales_team not like '%Turismo%'
+						then em_cto.sk_employee
+						else em_acc.sk_employee
+					end
+			end, -1) SK_employee
+	,	coalesce(
+			case when em_off.sales_team = 'Key Account (E-commerce)' or em_acc.sales_team = 'Key Account (E-commerce)'
+				then em_off.classification
+				else
+					case when ac.iscalculatedbycontract = 1 and em_acc.sales_team not like 'Sao Paulo%' and em_acc.sales_team not like '%Turismo%'
+						then em_cto.classification
+						else em_acc.classification
+					end
+			end, 'Em tratamento') Classification
+	,	dr.marca
+	,	case when em_off.sales_team = 'Key Account (E-commerce)' or em_acc.sales_team = 'Key Account (E-commerce)'
+			then 'Offer Owner'
+			else
+				case when ac.iscalculatedbycontract = 1 and em_acc.sales_team not like 'Sao Paulo%' and em_acc.sales_team not like '%Turismo%'
+					then 'Contract Owner'
+					else aco.owner_source
+				end
+		end owner_source
+	,	cast(case when aco.sharedservicepercent is null then 
+				case when np.accountname is not null
+						then coalesce(cp.Perc_Commission, 1)
+						else 
+							case when em_acc.classification like '%Hunter%' then 0 
+								else 1
+							end
+				end
+				else aco.sharedservicepercent
+			end as dec(10,3)) sharedservicepercent
+	,	sum(dr.qtycoupons) qtycoupons
+	,	sum(dr.grosssales) grosssales
+	,	sum(dr.grosssalespucommission) grosssalespucommission
+	,	sum(dr.grossrevenue) grossrevenue
+	,	sum(dr.administrativefee) administrativefee
+	,   sum(dr.gmv) GMV
+	,   sum(dr.rol) ROL
+	,   sum(dr.grossprofit) grossprofit
+	,	sum(case when np.accountname is not null 
+					and dr.eventdate between np.date_as_newpartner and dateadd(day,90,np.date_as_newpartner) 
+				then dr.grossrevenue 
+				else 0 
+			end) NewGrossRevenue
+	,   sum(case when np.accountname is not null 
+					and dr.eventdate between np.date_as_newpartner and dateadd(day,90,np.date_as_newpartner) 
+				then dr.grossprofit
+		  		else 0
+		  	end) NewGrossProfit
+	,	sum(dr.receita_comercial) Receita_Comercial
+from #tmp_discount_revenue dr (nolock)
+left join ods.Discount dis (nolock) on dis.DiscountID = dr.DiscountID
+left join ods.UnifiedDiscount udis (nolock) on dr.UnifiedDiscountID = udis.UnifiedDiscountID
+left join salesforce.ctOp_es_de_Compra op (nolock) on op.C_digo_Opcao_N_merico = dis.IdOpcaoDeCompra
+left join salesforce.ctOfertas offer (nolock) on offer.Id = op.Id_da_Oferta
+left join salesforce.ctOfertas offer2 (nolock) on offer2.c_digo_oferta_num_rico = udis.Idoferta
+left join reports.com_contract ct (nolock) on udis.ContractId = ct.contractid
+left join reports.com_account ac (nolock) on ac.AccountID = ct.AccountID
+left join #account_owner aco (nolock) on ac.accountid = aco.accountid
+left join reports.dm_employee em_off (nolock) on offer2.propriet_rio_compartilhado = em_off.employee_sf_code and em_off.active_dw_version = 'Y'
+left join reports.dm_employee em_acc (nolock) on aco.ownerid = em_acc.employee_sf_code and em_acc.active_dw_version = 'Y'
+left join reports.dm_employee em_cto (nolock) on ct.proprietario_compartilhado = em_cto.employee_sf_code and em_cto.active_dw_version = 'Y'
+left join #newpartner_last_date np (nolock) on (ac.accountid = np.accountid
+									and dr.eventdate between np.date_as_newpartner and dateadd(day,90,np.date_as_newpartner))
+left join #newpartner_last_date npc (nolock) on (ac.accountid = npc.accountid
+									and dr.eventdate between npc.date_as_newpartner and dateadd(day,180,npc.date_as_newpartner))
+left join reports.dm_commissionpolicy cp (nolock) on (em_acc.commissionpolicy_ID = cp.commissionpolicy_ID
+									and dr.eventdate between dateadd(day, cp.RangeStart, npc.date_as_newpartner) and dateadd(day, cp.RangeEnd, npc.date_as_newpartner)
+									and cp.active_dw_version = 'Y')
+where 1 = 1
+group by 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12;
+
+-----------------------------------------------------------------------------------------------------------
+-- Temp table 01 - Owners not Hunters
+-----------------------------------------------------------------------------------------------------------
+drop table if exists #tmc_lite_01_recent_owner_year_01;
+
+create table #tmc_lite_01_recent_owner_year_01 diststyle key distkey(Month) sortkey(eventdate, discountid) as
+select
+		dr.eventdate
+	,	dr.discountid
+	,	date_part(year,dr.EventDate) Year
+	,	date_part(month,dr.EventDate) Month
+	,	case
+			when date_part(w, dr.EventDate + 1) >= 51 and 	case
+																when extract(doy from dr.EventDate) between 365 and 366 then extract(doy from dr.EventDate)
+																else extract(doy from dr.EventDate + 1)
+															end < 8
+			then 1 else date_part(w, dr.EventDate + 1)
+		end Week Number
+	,	coalesce(em.name, 'Em tratamento') Sales Executive
+	,	coalesce(em.sales_coordinator, 'Em tratamento') Sales Manager
+	,	coalesce(em.sales_manager, 'Em tratamento') Sales Regional Director
+	,	coalesce(em.sales_region, 'Em tratamento') Account Region
+	,	coalesce(em.sales_team, 'Em tratamento') Team
+	,	ac.accountid
+	,	ac.AccountName
+	,	ac.accountcity Account_City
+	,	ac.state Account_State
+	,	s_ac.classifica_o_dbm Classificacao_DBM
+	,	offer.name OF
+	,	op.name OP
+	,	op.op_t_tulo_da_op_o Titulo_OP
+	,	offer.of_p_gina_de_publica_o Pagina
+	,	case
+			when ct.Category in ('Entretenimento','Entretenimento, Cultura e Vida Noturna','Entretenimento, Cultuta e Vida Noturna','Lazer')
+			then 'Entret. & Lazer'
+			else ct.Category
+		end  Category
+	,	case
+			when len(op.categoria_site_oferta) > 1 or op.categoria_site_oferta is not null then op.categoria_site_oferta
+			when len(offer.of_categoria_site) > 1 or offer.of_categoria_site is not null then offer.of_categoria_site
+			else ct.Category_Site
+		end Category Site
+	,	case
+			when len(op.subcategoria_site_oferta) > 1 or op.subcategoria_site_oferta is not null then op.subcategoria_site_oferta
+			when len(offer.of_subcategoria_site) > 1 or offer.of_subcategoria_site is not null then offer.of_subcategoria_site
+			else ct.SubCategory_Site
+		end	SubCategory Site
+	,	case
+			when len(op.sub_subcategoria_site_oferta) > 1 or op.sub_subcategoria_site_oferta is not null then op.sub_subcategoria_site_oferta
+			when len(offer.of_sub_subcategoria_site) > 1 or offer.of_sub_subcategoria_site is not null then offer.of_sub_subcategoria_site
+			else ct.subsub_ct_pu
+		end SubSubCategory Site
+	,	ac.atividade_economica Economic Activity
+	,	dr.marca
+	,	sum(dr.qtycoupons) qtycoupons
+	,	sum(dr.grosssales * dr.sharedservicepercent) grosssales
+	,	sum(dr.grosssalespucommission * dr.sharedservicepercent) grosssalespucommission
+	,	sum(dr.grossrevenue * dr.sharedservicepercent) grossrevenue
+	,	sum(dr.administrativefee * dr.sharedservicepercent) administrativefee
+	,   sum(dr.GMV * dr.sharedservicepercent) GMV
+	,   sum(dr.ROL * dr.sharedservicepercent) ROL
+	,   sum(dr.grossprofit * dr.sharedservicepercent) grossprofit
+	,	sum(dr.NewGrossRevenue * dr.sharedservicepercent) NewGrossRevenue
+	,   sum(dr.NewGrossProfit * dr.sharedservicepercent) NewGrossProfit
+	,   sum(dr.receita_comercial * dr.sharedservicepercent) Receita_comercial
+from #tmp_tmc_recent_owner_new dr (nolock)
+left join salesforce.ctOp_es_de_Compra op (nolock) on dr.IdOpcaoDeCompra = op.C_digo_Opcao_N_merico
+left join salesforce.ctOfertas offer (nolock) on dr.offer_id = offer.Id
+left join reports.com_contract ct (nolock) on dr.ContractId = ct.contractid
+left join reports.com_account ac (nolock) on dr.AccountID = ac.AccountID
+left join reports.dm_employee em (nolock) on dr.sk_employee = em.sk_employee
+left join salesforce.cfaccount s_ac (nolock) on dr.accountid = s_ac.id
+where 1 = 1
+	and (em.classification not like '%Hunter%' or em.classification is null)
+group by 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25;
+
+-----------------------------------------------------------------------------------------------------------
+-- Temp table 02 - Only Hunters
+-----------------------------------------------------------------------------------------------------------
+drop table if exists #tmc_lite_01_recent_owner_year_02;
+
+create table #tmc_lite_01_recent_owner_year_02 diststyle key distkey(Month) sortkey(eventdate, discountid) as
+select
+		dr.eventdate
+	,	dr.discountid
+	,	date_part(year,dr.EventDate) Year
+	,	date_part(month,dr.EventDate) Month
+	,	case
+			when date_part(w, dr.EventDate + 1) >= 51 and 	case
+																when extract(doy from dr.EventDate) between 365 and 366 then extract(doy from dr.EventDate)
+																else extract(doy from dr.EventDate + 1)
+															end < 8
+			then 1 else date_part(w, dr.EventDate + 1)
+		end Week Number
+	,	coalesce(em.name, 'Em tratamento') Sales Executive
+	,	coalesce(em.sales_coordinator, 'Em tratamento') Sales Manager
+	,	coalesce(em.sales_manager, 'Em tratamento') Sales Regional Director
+	,	coalesce(em.sales_region, 'Em tratamento') Account Region
+	,	coalesce(em.sales_team, 'Em tratamento') Team
+	,	ac.accountid
+	,	ac.AccountName
+	,	ac.accountcity Account_City
+	,	ac.state Account_State
+	,	s_ac.classifica_o_dbm Classificacao_DBM
+	,	offer.name OF
+	,	op.name OP
+	,	op.op_t_tulo_da_op_o Titulo_OP
+	,	offer.of_p_gina_de_publica_o Pagina
+	,	case
+			when ct.Category in ('Entretenimento','Entretenimento, Cultura e Vida Noturna','Entretenimento, Cultuta e Vida Noturna','Lazer')
+			then 'Entret. & Lazer'
+			else ct.Category
+		end  Category
+	,	case
+			when len(op.categoria_site_oferta) > 1 or op.categoria_site_oferta is not null then op.categoria_site_oferta
+			when len(offer.of_categoria_site) > 1 or offer.of_categoria_site is not null then offer.of_categoria_site
+			else ct.Category_Site
+		end Category Site
+	,	case
+			when len(op.subcategoria_site_oferta) > 1 or op.subcategoria_site_oferta is not null then op.subcategoria_site_oferta
+			when len(offer.of_subcategoria_site) > 1 or offer.of_subcategoria_site is not null then offer.of_subcategoria_site
+			else ct.SubCategory_Site
+		end	SubCategory Site
+	,	case
+			when len(op.sub_subcategoria_site_oferta) > 1 or op.sub_subcategoria_site_oferta is not null then op.sub_subcategoria_site_oferta
+			when len(offer.of_sub_subcategoria_site) > 1 or offer.of_sub_subcategoria_site is not null then offer.of_sub_subcategoria_site
+			else ct.subsub_ct_pu
+		end SubSubCategory Site
+	,	ac.atividade_economica Economic Activity
+	,	dr.marca
+	,	sum(dr.qtycoupons) qtycoupons
+	,	sum(dr.grosssales * dr.sharedservicepercent) grosssales
+	,	sum(dr.grosssalespucommission * dr.sharedservicepercent) grosssalespucommission
+	,	sum(dr.grossrevenue * dr.sharedservicepercent) grossrevenue
+	,	sum(dr.administrativefee * dr.sharedservicepercent) administrativefee
+	,   sum(dr.GMV * dr.sharedservicepercent) GMV
+	,   sum(dr.ROL * dr.sharedservicepercent) ROL
+	,   sum(dr.grossprofit * dr.sharedservicepercent) grossprofit
+	,	sum(dr.NewGrossRevenue * dr.sharedservicepercent) NewGrossRevenue
+	,   sum(dr.NewGrossProfit * dr.sharedservicepercent) NewGrossProfit
+	,   sum(dr.receita_comercial * dr.sharedservicepercent) Receita_comercial
+from #tmp_tmc_recent_owner_new dr (nolock)
+left join salesforce.ctOp_es_de_Compra op (nolock) on dr.IdOpcaoDeCompra = op.C_digo_Opcao_N_merico
+left join salesforce.ctOfertas offer (nolock) on dr.offer_id = offer.Id
+left join reports.com_contract ct (nolock) on dr.ContractId = ct.contractid
+left join reports.com_account ac (nolock) on dr.AccountID = ac.AccountID
+left join reports.dm_employee em (nolock) on dr.sk_employee = em.sk_employee
+left join salesforce.cfaccount s_ac (nolock) on dr.accountid = s_ac.id
+where 1 = 1
+	and em.classification like '%Hunter%'
+group by 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25;
+
+-----------------------------------------------------------------------------------------------------------
+-- Final table - Full join to capture all possible cases
+-----------------------------------------------------------------------------------------------------------
+drop table if exists reports.tmc_lite_01_recent_owner_year;
+
+create table reports.tmc_lite_01_recent_owner_year diststyle key distkey(Month) sortkey(eventdate, Year, Month, Sales Regional Director) as
+select
+	coalesce(tmc_f.eventdate, tmc_h.eventdate) eventdate
+	,	coalesce(tmc_f.Year, tmc_h.Year) Year
+	,	coalesce(tmc_f.Month, tmc_h.Month) Month
+	,	coalesce(tmc_f.Week Number,tmc_h.Week Number) Week Number
+	,	coalesce(tmc_f.Sales Executive, 'Em tratamento') Sales Executive
+	,	coalesce(tmc_f.Sales Manager, 'Em tratamento') Sales Manager
+	,	coalesce(tmc_f.Sales Regional Director, 'Em tratamento') Sales Regional Director
+	,	coalesce(tmc_f.Account Region, 'Em tratamento') Account Region
+	,	coalesce(tmc_f.Team, 'Em tratamento') Team
+	,	coalesce(tmc_h.Sales Executive, 'Conta sem Hunter') Sales Executive (Hunter)
+	,	coalesce(tmc_h.Sales Manager, 'Conta sem Hunter') Sales Manager (Hunter)
+	,	coalesce(tmc_h.Sales Regional Director, 'Conta sem Hunter') Sales Regional Director (Hunter)
+	,	coalesce(tmc_h.Account Region, 'Conta sem Hunter') Account Region (Hunter)
+	,	coalesce(tmc_h.Team, 'Conta sem Hunter') Team (Hunter)
+	,	coalesce(tmc_f.accountid, tmc_h.accountid) accountid
+	,	coalesce(tmc_f.AccountName, tmc_h.AccountName) AccountName
+	,	coalesce(tmc_f.Account_City, tmc_h.Account_City) Account_City
+	,	coalesce(tmc_f.Account_State, tmc_h.Account_State) Account_State
+	,	coalesce(tmc_f.Classificacao_DBM, tmc_h.Classificacao_DBM) Classificacao_DBM
+	,	coalesce(tmc_f.OF, tmc_h.OF) OF
+	,	coalesce(tmc_f.OP, tmc_h.OP) OP
+	,	coalesce(tmc_f.Titulo_OP, tmc_h.Titulo_OP) Titulo_OP
+	,	coalesce(tmc_f.Pagina, tmc_h.Pagina) Pagina
+	,	coalesce(tmc_f.Category, tmc_h.Category) Category
+	,	coalesce(tmc_f.Category Site, tmc_h.Category Site) Category Site
+	,	coalesce(tmc_f.SubCategory Site, tmc_h.SubCategory Site) SubCategory Site
+	,	coalesce(tmc_f.SubSubCategory Site, tmc_h.SubSubCategory Site) SubSubCategory Site
+	,	coalesce(tmc_f.Economic Activity, tmc_h.Economic Activity) Economic Activity
+	,	coalesce(tmc_f.marca, tmc_h.marca) marca
+	,	sum(coalesce(tmc_f.qtycoupons, tmc_h.qtycoupons)) qtycoupons
+	,	sum(coalesce(tmc_f.grosssales, tmc_h.grosssales)) grosssales
+	,	sum(coalesce(tmc_f.grosssalespucommission, tmc_h.grosssalespucommission)) grosssalespucommission
+	,	sum(coalesce(tmc_f.grossrevenue, tmc_h.grossrevenue)) grossrevenue
+	,	sum(coalesce(tmc_f.administrativefee, tmc_h.administrativefee)) administrativefee
+	,   sum(coalesce(tmc_f.GMV, tmc_h.GMV)) GMV
+	,   sum(coalesce(tmc_f.ROL, tmc_h.ROL)) ROL
+	,   sum(coalesce(tmc_f.grossprofit, tmc_h.grossprofit)) grossprofit
+	,	sum(coalesce(tmc_f.NewGrossRevenue, tmc_h.NewGrossRevenue)) NewGrossRevenue
+	,   sum(coalesce(tmc_f.NewGrossProfit, tmc_h.NewGrossProfit)) NewGrossProfit
+	,   sum(coalesce(tmc_f.Receita_Comercial, tmc_h.Receita_Comercial)) Receita_Comercial
+	,	getdate() Date_DW_Load
+from #tmc_lite_01_recent_owner_year_01 tmc_f
+full join #tmc_lite_01_recent_owner_year_02 tmc_h on tmc_f.discountid = tmc_h.discountid and tmc_f.eventdate = tmc_h.eventdate and tmc_f.marca = tmc_h.marca
+group by 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29;
+
+analyze reports.tmc_lite_01_recent_owner_year;
+
+grant all privileges on table reports.tmc_lite_01_recent_owner_year to group bi_group;
+grant all privileges on table reports.tmc_lite_01_recent_owner_year to group bi_group_r;
+
+-----------------------------------------------------------------------------------------------------------
+-- TMC Recent Owner - Only last 7 months
+-----------------------------------------------------------------------------------------------------------
+drop table if exists reports.tmc_lite_01_recent_owner;
+
+create table reports.tmc_lite_01_recent_owner diststyle key distkey(Month) sortkey(eventdate, Year, Month) as
+select 
+	eventdate
+	,	Year
+	,	Month
+	,	Week Number
+	,	Sales Executive
+	,	Sales Manager
+	,	Sales Regional Director
+	,	Account Region
+	,	Team
+	,	Sales Executive (Hunter)
+	,	Sales Manager (Hunter)
+	,	Sales Regional Director (Hunter)
+	,	Account Region (Hunter)
+	,	Team (Hunter)
+	,	accountid
+	,	AccountName
+	,	Account_City
+	,	Account_State
+	,	Classificacao_DBM
+	,	OF
+	,	OP
+	,	Titulo_OP
+	,	Pagina
+	,	Category
+	,	Category Site
+	,	SubCategory Site
+	,	SubSubCategory Site
+	,	Economic Activity
+	,	marca
+	,	qtycoupons
+	,	grosssales
+	,	grosssalespucommission
+	,	grossrevenue
+	,	administrativefee
+	,	GMV
+	,	ROL
+	,	grossprofit
+	,	NewGrossRevenue
+	,	NewGrossProfit
+	,	Receita_Comercial
+	,	getdate() Date_DW_Load
+from reports.tmc_lite_01_recent_owner_year
+where eventdate between left(dateadd(month, -7, getdate() - 1), 7) + '-01' and cast(getdate() - 1 as date);
+
+analyze reports.tmc_lite_01_recent_owner;
+
+grant all privileges on table reports.tmc_lite_01_recent_owner to group bi_group;
+grant all privileges on table reports.tmc_lite_01_recent_owner to group bi_group_r;

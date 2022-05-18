@@ -1,0 +1,230 @@
+﻿
+drop table if exists #months
+;
+create table #months
+(
+	month int
+)
+distkey(month)
+sortkey(month)
+;
+insert into #months values (0);
+insert into #months values (1);
+insert into #months values (2);
+insert into #months values (3);
+insert into #months values (4);
+insert into #months values (5);
+insert into #months values (6);
+insert into #months values (7);
+insert into #months values (8);
+insert into #months values (9);
+insert into #months values (10);
+insert into #months values (11);
+insert into #months values (12);
+insert into #months values (13);
+insert into #months values (14);
+insert into #months values (15);
+insert into #months values (16);
+insert into #months values (17);
+insert into #months values (18);
+insert into #months values (19);
+insert into #months values (20);
+insert into #months values (21);
+insert into #months values (22);
+insert into #months values (23);
+insert into #months values (24);
+
+
+delete from reports.ltvComparison where testName = '<@testname@>';
+
+insert into reports.ltvComparison
+
+
+	select
+		y.userAccountPurchaseClass
+	,	y.userTypeName
+	,	y.testName
+	,	y.yearMonth
+	,	y.isUserAccountUnified	
+	,	y."month"
+	,	y.qtyUsers
+	,	sum(coalesce(GrossSales,0)) over(partition by 	y.userAccountPurchaseClass
+													,	y.userTypeName
+													,	y.testName
+													,	y.yearMonth
+													,	y.isUserAccountUnified	
+										 	order by 	y.month
+										 	rows unbounded preceding) accumGrossSales
+	,	sum(coalesce(GrossRevenue,0)) over(partition by y.userAccountPurchaseClass
+													,	y.userTypeName
+													,	y.testName
+													,	y.yearMonth
+													,	y.isUserAccountUnified	
+										 	order by 	y.month
+										 	rows unbounded preceding) accumGrossRevenue
+	,	sum(coalesce(GrossRevenueMinusPromocode,0)) over(partition by 	y.userAccountPurchaseClass
+													,	y.userTypeName
+													,	y.testName
+													,	y.yearMonth
+													,	y.isUserAccountUnified	
+										 	order by 	y.month
+										 	rows unbounded preceding) accumGrossRevenueMinusPromocode
+	,	sum(coalesce(NetRevenue,0)) over(partition by 	y.userAccountPurchaseClass
+													,	y.userTypeName
+													,	y.testName
+													,	y.yearMonth
+													,	y.isUserAccountUnified	
+										 	order by 	y.month
+										 	rows unbounded preceding) accumNetRevenue
+	,	sum(coalesce(NetRevenueMinusPromocode,0)) over(partition by 	y.userAccountPurchaseClass
+													,	y.userTypeName
+													,	y.testName
+													,	y.yearMonth
+													,	y.isUserAccountUnified	
+										 	order by 	y.month
+										 	rows unbounded preceding) accumNetRevenueMinusPromocode
+	,	'LTV Total' valueType
+	from
+	(
+		select
+		*
+		from
+		(
+			select 
+				u.userAccountPurchaseClass
+			,	u.userTypeName
+			,	u.testName
+			,	u.yearMonth
+			,	u.isUserAccountUnified	
+			,	count(distinct userAccountId) QTYUsers
+			from #ltvUsersAnalysis u
+			group by 1,2,3,4,5
+		) k
+		, #months m
+	) y left join
+	(
+		select
+			u.userAccountPurchaseClass
+		,	u.userTypeName
+		,	u.testName
+		,	u.yearMonth
+		,	u.isUserAccountUnified	
+		,	datediff(month,u.EventDate,p.EventDate) "month"
+		,	sum(GrossSales) GrossSales
+		,	sum(GrossRevenue) GrossRevenue
+		,	sum(GrossRevenueMinusPromocode) GrossRevenueMinusPromocode
+		,	sum(NetRevenue) NetRevenue
+		,	sum(NetRevenueMinusPromocode) NetRevenueMinusPromocode
+		from #ltvUsersAnalysis u
+		inner join reports.PurchaseOrder p
+		on 	u.useraccountid = p.userAccountId
+		and	u.isUserAccountUnified = p.isUserAccountUnified
+		and u.userAccountPurchaseOrder <= p.PurchaseOrder
+		group by 1,2,3,4,5,6
+	) x 
+	on
+		y.userAccountPurchaseClass = x.userAccountPurchaseClass
+	and	y.userTypeName = x.userTypeName
+	and	y.testName = x.testName
+	and	y.yearMonth = x.yearMonth
+	and	y.isUserAccountUnified	= x.isUserAccountUnified
+	and	y."month" = x."month"
+
+;
+
+
+
+insert into reports.ltvComparison
+
+	select
+		y.userAccountPurchaseClass
+	,	y.userTypeName
+	,	y.testName
+	,	y.yearMonth
+	,	y.isUserAccountUnified	
+	,	y."month"
+	,	y.qtyUsers
+	,	sum(coalesce(GrossSales,0)) over(partition by 	y.userAccountPurchaseClass
+													,	y.userTypeName
+													,	y.testName
+													,	y.yearMonth
+													,	y.isUserAccountUnified	
+										 	order by 	y.month
+										 	rows unbounded preceding) accumGrossSales
+	,	sum(coalesce(GrossRevenue,0)) over(partition by y.userAccountPurchaseClass
+													,	y.userTypeName
+													,	y.testName
+													,	y.yearMonth
+													,	y.isUserAccountUnified	
+										 	order by 	y.month
+										 	rows unbounded preceding) accumGrossRevenue
+	,	sum(coalesce(GrossRevenueMinusPromocode,0)) over(partition by 	y.userAccountPurchaseClass
+													,	y.userTypeName
+													,	y.testName
+													,	y.yearMonth
+													,	y.isUserAccountUnified	
+										 	order by 	y.month
+										 	rows unbounded preceding) accumGrossRevenueMinusPromocode
+	,	sum(coalesce(NetRevenue,0)) over(partition by 	y.userAccountPurchaseClass
+													,	y.userTypeName
+													,	y.testName
+													,	y.yearMonth
+													,	y.isUserAccountUnified	
+										 	order by 	y.month
+										 	rows unbounded preceding) accumNetRevenue
+	,	sum(coalesce(NetRevenueMinusPromocode,0)) over(partition by 	y.userAccountPurchaseClass
+													,	y.userTypeName
+													,	y.testName
+													,	y.yearMonth
+													,	y.isUserAccountUnified	
+										 	order by 	y.month
+										 	rows unbounded preceding) accumNetRevenueMinusPromocode									 
+	,	'LTV Adicional' valueType
+	from
+	(
+		select
+		*
+		from
+		(
+			select 
+				u.userAccountPurchaseClass
+			,	u.userTypeName
+			,	u.testName
+			,	u.yearMonth
+			,	u.isUserAccountUnified	
+			,	count(distinct userAccountId) QTYUsers
+			from #ltvUsersAnalysis u
+			group by 1,2,3,4,5
+		) k
+		, #months m
+	) y left join
+	(
+		select
+			u.userAccountPurchaseClass
+		,	u.userTypeName
+		,	u.testName
+		,	u.yearMonth
+		,	u.isUserAccountUnified	
+		,	datediff(month,u.EventDate,p.EventDate) "month"
+		,	sum(GrossSales) GrossSales
+		,	sum(GrossRevenue) GrossRevenue
+		,	sum(GrossRevenueMinusPromocode) GrossRevenueMinusPromocode
+		,	sum(NetRevenue) NetRevenue
+		,	sum(NetRevenueMinusPromocode) NetRevenueMinusPromocode
+		from #ltvUsersAnalysis u
+		inner join reports.PurchaseOrder p
+		on 	u.useraccountid = p.userAccountId
+		and	u.isUserAccountUnified = p.isUserAccountUnified
+		and u.userAccountPurchaseOrder < p.PurchaseOrder
+		group by 1,2,3,4,5,6
+	) x 
+	on
+		y.userAccountPurchaseClass = x.userAccountPurchaseClass
+	and	y.userTypeName = x.userTypeName
+	and	y.testName = x.testName
+	and	y.yearMonth = x.yearMonth
+	and	y.isUserAccountUnified	= x.isUserAccountUnified
+	and	y."month" = x."month"
+
+
+	

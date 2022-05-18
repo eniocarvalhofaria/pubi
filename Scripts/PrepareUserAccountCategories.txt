@@ -1,0 +1,417 @@
+
+drop table if exists #DiscountCategories
+;
+create table #DiscountCategories
+(
+	DiscountId int
+,	BuyOptionId	int
+,	CategoryTypeId int
+,	CategoryGroupId int
+,	CategoryId int
+,	SubCategoryId int
+)
+distkey(DiscountId)
+sortkey(DiscountId)
+;
+insert into  #DiscountCategories
+select 
+	d.discountId
+,	BuyOptionId
+,	CategoryTypeId
+,	CategoryGroupId
+,	CategoryId
+,	SubCategoryId
+from reports.discountdetails d
+inner join reports.buyoptionCategories b 
+on d.c_digo_opcao_n_merico = b.BuyOptionId
+;
+drop table if exists #UserPurchase
+;
+select 
+	purchaseid
+,	pur.purchaseruseraccountid UserAccountId
+,	CategoryTypeId 
+,	CategoryGroupId
+,	CategoryId
+,	SubCategoryId
+,	case when rank() over(partition by pur.purchaseruseraccountid order by purchaseinitiated desc, SubCategoryId) = 1 then 1 else 0 end IsLastOrder
+,	case when rank() over(partition by pur.purchaseruseraccountid order by case when countsasrevenue = 1 then purchaseinitiated else null end desc, SubCategoryId) = 1 then 1 else 0 end IsLastSale
+,	quantity
+,	unitvalue
+,	purchaseinitiated
+,	countsasrevenue
+into #UserPurchase
+from ods.purchase pur 
+left join stage.purchasestatus ps 
+on pur.purchasestatusid = ps.purchasestatusid
+inner join #DiscountCategories dc 
+on pur.discountid = dc.discountid
+;
+drop table if exists #UserAccountCategories
+;
+select
+	UserAccountId
+,	CategoryTypeId
+,	CategoryGroupId
+,	CategoryId
+,	SubCategoryId
+,	IsLastOrder
+,	IsLastSale
+,	max(cast(purchaseinitiated as date)) LastDateOrder
+,	max(case when countsasrevenue = 1 then cast(purchaseinitiated as date) else null end) LastDateSale
+
+
+,	sum(quantity * unitvalue) GrossSalesOrderTotal
+,	sum(1) QuantityOrderTotal
+,	sum(countsasrevenue * quantity * unitvalue) GrossSalesSaleTotal
+,	sum(countsasrevenue) QuantitySaleTotal
+
+,	sum(case when datediff(month,cast(purchaseinitiated as date),getdate()) <= 12 then quantity * unitvalue else 0 end) GrossSalesOrder12Months
+,	sum(case when datediff(month,cast(purchaseinitiated as date),getdate()) <= 12 then 1 else 0 end) QuantityOrder12Months
+,	sum(case when datediff(month,cast(purchaseinitiated as date),getdate()) <= 12 then countsasrevenue * quantity * unitvalue else 0 end) GrossSalesSale12Months
+,	sum(case when datediff(month,cast(purchaseinitiated as date),getdate()) <= 12 then countsasrevenue else 0 end) QuantitySale12Months
+
+
+,	sum(case when datediff(month,cast(purchaseinitiated as date),getdate()) <= 6 then quantity * unitvalue else 0 end) GrossSalesOrder6Months
+,	sum(case when datediff(month,cast(purchaseinitiated as date),getdate()) <= 6 then 1 else 0 end) QuantityOrder6Months
+,	sum(case when datediff(month,cast(purchaseinitiated as date),getdate()) <= 6 then countsasrevenue * quantity * unitvalue else 0 end) GrossSalesSale6Months
+,	sum(case when datediff(month,cast(purchaseinitiated as date),getdate()) <= 6 then countsasrevenue else 0 end) QuantitySale6Months
+into #UserAccountCategories
+from #UserPurchase
+group by 1,2,3,4,5,6,7
+;
+truncate table  reports.UserAccountCategories
+;
+insert into reports.UserAccountCategories
+select * from #UserAccountCategories
+;
+drop table if exists #UserAccountMainCategories
+;
+select 
+	z1.UserAccountId
+,	MainCategoryTypeIdGSOTotal
+,	MainCategoryTypeIdQOTotal
+,	MainCategoryTypeIdGSSTotal
+,	MainCategoryTypeIdQSTotal
+,	MainCategoryTypeIdGSO12
+,	MainCategoryTypeIdQO12
+,	MainCategoryTypeIdGSS12
+,	MainCategoryTypeIdQS12
+,	MainCategoryTypeIdGSO6
+,	MainCategoryTypeIdQO6
+,	MainCategoryTypeIdGSS6
+,	MainCategoryTypeIdQS6
+,	CategoryTypeIdLastOrder
+,	CategoryTypeIdLastSale
+,	MainCategoryGroupIdGSOTotal
+,	MainCategoryGroupIdQOTotal
+,	MainCategoryGroupIdGSSTotal
+,	MainCategoryGroupIdQSTotal
+,	MainCategoryGroupIdGSO12
+,	MainCategoryGroupIdQO12
+,	MainCategoryGroupIdGSS12
+,	MainCategoryGroupIdQS12
+,	MainCategoryGroupIdGSO6
+,	MainCategoryGroupIdQO6
+,	MainCategoryGroupIdGSS6
+,	MainCategoryGroupIdQS6
+,	CategoryGroupIdLastOrder
+,	CategoryGroupIdLastSale
+,	MainCategoryIdGSOTotal
+,	MainCategoryIdQOTotal
+,	MainCategoryIdGSSTotal
+,	MainCategoryIdQSTotal
+,	MainCategoryIdGSO12
+,	MainCategoryIdQO12
+,	MainCategoryIdGSS12
+,	MainCategoryIdQS12
+,	MainCategoryIdGSO6
+,	MainCategoryIdQO6
+,	MainCategoryIdGSS6
+,	MainCategoryIdQS6
+,	CategoryIdLastOrder
+,	CategoryIdLastSale
+,	MainSubcategoryIdGSOTotal
+,	MainSubcategoryIdQOTotal
+,	MainSubcategoryIdGSSTotal
+,	MainSubcategoryIdQSTotal
+,	MainSubcategoryIdGSO12
+,	MainSubcategoryIdQO12
+,	MainSubcategoryIdGSS12
+,	MainSubcategoryIdQS12
+,	MainSubcategoryIdGSO6
+,	MainSubcategoryIdQO6
+,	MainSubcategoryIdGSS6
+,	MainSubcategoryIdQS6
+,	SubcategoryIdLastOrder
+,	SubcategoryIdLastSale
+into #UserAccountMainCategories
+from 
+(
+	select 
+		UserAccountId
+	,	max(MainCategoryTypeIdGSOTotal)	 MainCategoryTypeIdGSOTotal
+	,	max(MainCategoryTypeIdQOTotal) MainCategoryTypeIdQOTotal
+	,	max(MainCategoryTypeIdGSSTotal) MainCategoryTypeIdGSSTotal
+	,	max(MainCategoryTypeIdQSTotal) MainCategoryTypeIdQSTotal
+	,	max(MainCategoryTypeIdGSO12) MainCategoryTypeIdGSO12
+	,	max(MainCategoryTypeIdQO12) MainCategoryTypeIdQO12
+	,	max(MainCategoryTypeIdGSS12) MainCategoryTypeIdGSS12
+	,	max(MainCategoryTypeIdQS12) MainCategoryTypeIdQS12
+	,	max(MainCategoryTypeIdGSO6) MainCategoryTypeIdGSO6
+	,	max(MainCategoryTypeIdQO6) MainCategoryTypeIdQO6
+	,	max(MainCategoryTypeIdGSS6) MainCategoryTypeIdGSS6
+	,	max(MainCategoryTypeIdQS6) MainCategoryTypeIdQS6
+	,	max(CategoryTypeIdLastOrder) CategoryTypeIdLastOrder
+	,	max(CategoryTypeIdLastSale) CategoryTypeIdLastSale
+	from 
+	(
+		select
+			UserAccountId
+		,	case when rank() over(partition by UserAccountId order by GrossSalesOrderTotal desc,CategoryTypeId) = 1 then CategoryTypeId else 0 end MainCategoryTypeIdGSOTotal
+		,	case when rank() over(partition by UserAccountId order by QuantityOrderTotal desc,CategoryTypeId) = 1 then CategoryTypeId else 0 end MainCategoryTypeIdQOTotal
+		,	case when rank() over(partition by UserAccountId order by GrossSalesSaleTotal desc,CategoryTypeId) = 1 then CategoryTypeId else 0 end MainCategoryTypeIdGSSTotal
+		,	case when rank() over(partition by UserAccountId order by QuantitySaleTotal desc,CategoryTypeId) = 1 then CategoryTypeId else 0 end MainCategoryTypeIdQSTotal
+		,	case when rank() over(partition by UserAccountId order by GrossSalesOrder12Months desc,CategoryTypeId) = 1 then CategoryTypeId else 0 end MainCategoryTypeIdGSO12
+		,	case when rank() over(partition by UserAccountId order by QuantityOrder12Months desc,CategoryTypeId) = 1 then CategoryTypeId else 0 end MainCategoryTypeIdQO12
+		,	case when rank() over(partition by UserAccountId order by GrossSalesSale12Months desc,CategoryTypeId) = 1 then CategoryTypeId else 0 end MainCategoryTypeIdGSS12
+		,	case when rank() over(partition by UserAccountId order by QuantitySale12Months desc,CategoryTypeId) = 1 then CategoryTypeId else 0 end MainCategoryTypeIdQS12
+		,	case when rank() over(partition by UserAccountId order by GrossSalesOrder6Months desc,CategoryTypeId) = 1 then CategoryTypeId else 0 end MainCategoryTypeIdGSO6
+		,	case when rank() over(partition by UserAccountId order by QuantityOrder6Months desc,CategoryTypeId) = 1 then CategoryTypeId else 0 end MainCategoryTypeIdQO6
+		,	case when rank() over(partition by UserAccountId order by GrossSalesSale6Months desc,CategoryTypeId) = 1 then CategoryTypeId else 0 end MainCategoryTypeIdGSS6
+		,	case when rank() over(partition by UserAccountId order by QuantitySale6Months desc,CategoryTypeId) = 1 then CategoryTypeId else 0 end MainCategoryTypeIdQS6
+		,	case when rank() over(partition by UserAccountId order by LastDateOrder desc,CategoryTypeId) = 1 then CategoryTypeId else 0 end CategoryTypeIdLastOrder
+		,	case when rank() over(partition by UserAccountId order by LastDateSale desc,CategoryTypeId) = 1 then CategoryTypeId else 0 end CategoryTypeIdLastSale
+		from 
+		(
+			select 
+				UserAccountId
+			,	CategoryTypeId
+			,	sum(GrossSalesOrderTotal) GrossSalesOrderTotal
+			,	sum(QuantityOrderTotal) QuantityOrderTotal
+			,	sum(GrossSalesSaleTotal) GrossSalesSaleTotal
+			,	sum(QuantitySaleTotal) QuantitySaleTotal	
+				
+			,	sum(GrossSalesOrder12Months) GrossSalesOrder12Months
+			,	sum(QuantityOrder12Months) QuantityOrder12Months
+			,	sum(GrossSalesSale12Months) GrossSalesSale12Months
+			,	sum(QuantitySale12Months) QuantitySale12Months
+			
+			,	sum(GrossSalesOrder6Months) GrossSalesOrder6Months
+			,	sum(QuantityOrder6Months) QuantityOrder6Months
+			,	sum(GrossSalesSale6Months) GrossSalesSale6Months
+			,	sum(QuantitySale6Months) QuantitySale6Months
+			,	max(LastDateOrder) LastDateOrder
+			,	max(LastDateSale) LastDateSale	
+			from #UserAccountCategories
+			group by 1,2
+		) x
+		
+	) y
+	group by 1
+) z1
+inner join 
+(
+	select 
+		UserAccountId
+	,	max(MainCategoryGroupIdGSOTotal) MainCategoryGroupIdGSOTotal
+	,	max(MainCategoryGroupIdQOTotal) MainCategoryGroupIdQOTotal
+	,	max(MainCategoryGroupIdGSSTotal) MainCategoryGroupIdGSSTotal
+	,	max(MainCategoryGroupIdQSTotal) MainCategoryGroupIdQSTotal
+	,	max(MainCategoryGroupIdGSO12) MainCategoryGroupIdGSO12
+	,	max(MainCategoryGroupIdQO12) MainCategoryGroupIdQO12
+	,	max(MainCategoryGroupIdGSS12) MainCategoryGroupIdGSS12
+	,	max(MainCategoryGroupIdQS12) MainCategoryGroupIdQS12
+	,	max(MainCategoryGroupIdGSO6) MainCategoryGroupIdGSO6
+	,	max(MainCategoryGroupIdQO6) MainCategoryGroupIdQO6
+	,	max(MainCategoryGroupIdGSS6) MainCategoryGroupIdGSS6
+	,	max(MainCategoryGroupIdQS6) MainCategoryGroupIdQS6
+	,	max(CategoryGroupIdLastOrder) CategoryGroupIdLastOrder
+	,	max(CategoryGroupIdLastSale) CategoryGroupIdLastSale
+	from 
+	(
+		select
+			UserAccountId
+		,	case when rank() over(partition by UserAccountId order by GrossSalesOrderTotal desc,CategoryGroupId) = 1 then CategoryGroupId else 0 end MainCategoryGroupIdGSOTotal
+		,	case when rank() over(partition by UserAccountId order by QuantityOrderTotal desc,CategoryGroupId) = 1 then CategoryGroupId else 0 end MainCategoryGroupIdQOTotal
+		,	case when rank() over(partition by UserAccountId order by GrossSalesSaleTotal desc,CategoryGroupId) = 1 then CategoryGroupId else 0 end MainCategoryGroupIdGSSTotal
+		,	case when rank() over(partition by UserAccountId order by QuantitySaleTotal desc,CategoryGroupId) = 1 then CategoryGroupId else 0 end MainCategoryGroupIdQSTotal
+		,	case when rank() over(partition by UserAccountId order by GrossSalesOrder12Months desc,CategoryGroupId) = 1 then CategoryGroupId else 0 end MainCategoryGroupIdGSO12
+		,	case when rank() over(partition by UserAccountId order by QuantityOrder12Months desc,CategoryGroupId) = 1 then CategoryGroupId else 0 end MainCategoryGroupIdQO12
+		,	case when rank() over(partition by UserAccountId order by GrossSalesSale12Months desc,CategoryGroupId) = 1 then CategoryGroupId else 0 end MainCategoryGroupIdGSS12
+		,	case when rank() over(partition by UserAccountId order by QuantitySale12Months desc,CategoryGroupId) = 1 then CategoryGroupId else 0 end MainCategoryGroupIdQS12
+		,	case when rank() over(partition by UserAccountId order by GrossSalesOrder6Months desc,CategoryGroupId) = 1 then CategoryGroupId else 0 end MainCategoryGroupIdGSO6
+		,	case when rank() over(partition by UserAccountId order by QuantityOrder6Months desc,CategoryGroupId) = 1 then CategoryGroupId else 0 end MainCategoryGroupIdQO6
+		,	case when rank() over(partition by UserAccountId order by GrossSalesSale6Months desc,CategoryGroupId) = 1 then CategoryGroupId else 0 end MainCategoryGroupIdGSS6
+		,	case when rank() over(partition by UserAccountId order by QuantitySale6Months desc,CategoryGroupId) = 1 then CategoryGroupId else 0 end MainCategoryGroupIdQS6
+		,	case when rank() over(partition by UserAccountId order by LastDateOrder desc,CategoryGroupId) = 1 then CategoryGroupId else 0 end CategoryGroupIdLastOrder
+		,	case when rank() over(partition by UserAccountId order by LastDateSale desc,CategoryGroupId) = 1 then CategoryGroupId else 0 end CategoryGroupIdLastSale
+		from 
+		(
+			select 
+				UserAccountId
+			,	CategoryGroupId
+			,	sum(GrossSalesOrderTotal) GrossSalesOrderTotal
+			,	sum(QuantityOrderTotal) QuantityOrderTotal
+			,	sum(GrossSalesSaleTotal) GrossSalesSaleTotal
+			,	sum(QuantitySaleTotal) QuantitySaleTotal	
+				
+			,	sum(GrossSalesOrder12Months) GrossSalesOrder12Months
+			,	sum(QuantityOrder12Months) QuantityOrder12Months
+			,	sum(GrossSalesSale12Months) GrossSalesSale12Months
+			,	sum(QuantitySale12Months) QuantitySale12Months
+			
+			,	sum(GrossSalesOrder6Months) GrossSalesOrder6Months
+			,	sum(QuantityOrder6Months) QuantityOrder6Months
+			,	sum(GrossSalesSale6Months) GrossSalesSale6Months
+			,	sum(QuantitySale6Months) QuantitySale6Months
+			,	max(LastDateOrder) LastDateOrder
+			,	max(LastDateSale) LastDateSale	
+			from #UserAccountCategories
+			group by 1,2
+		) x
+		
+	) y
+	group by 1
+) z2
+on z1.UserAccountId = z2.UserAccountId
+inner join
+(
+	select 
+		UserAccountId
+	,	max(MainCategoryIdGSOTotal) MainCategoryIdGSOTotal
+	,	max(MainCategoryIdQOTotal) MainCategoryIdQOTotal
+	,	max(MainCategoryIdGSSTotal) MainCategoryIdGSSTotal
+	,	max(MainCategoryIdQSTotal) MainCategoryIdQSTotal
+	,	max(MainCategoryIdGSO12) MainCategoryIdGSO12
+	,	max(MainCategoryIdQO12) MainCategoryIdQO12
+	,	max(MainCategoryIdGSS12) MainCategoryIdGSS12
+	,	max(MainCategoryIdQS12) MainCategoryIdQS12
+	,	max(MainCategoryIdGSO6) MainCategoryIdGSO6
+	,	max(MainCategoryIdQO6) MainCategoryIdQO6
+	,	max(MainCategoryIdGSS6) MainCategoryIdGSS6
+	,	max(MainCategoryIdQS6) MainCategoryIdQS6
+	,	max(CategoryIdLastOrder) CategoryIdLastOrder
+	,	max(CategoryIdLastSale) CategoryIdLastSale
+	from 
+	(
+		select
+			UserAccountId
+		,	case when rank() over(partition by UserAccountId order by GrossSalesOrderTotal desc,CategoryId) = 1 then CategoryId else 0 end MainCategoryIdGSOTotal
+		,	case when rank() over(partition by UserAccountId order by QuantityOrderTotal desc,CategoryId) = 1 then CategoryId else 0 end MainCategoryIdQOTotal
+		,	case when rank() over(partition by UserAccountId order by GrossSalesSaleTotal desc,CategoryId) = 1 then CategoryId else 0 end MainCategoryIdGSSTotal
+		,	case when rank() over(partition by UserAccountId order by QuantitySaleTotal desc,CategoryId) = 1 then CategoryId else 0 end MainCategoryIdQSTotal
+		,	case when rank() over(partition by UserAccountId order by GrossSalesOrder12Months desc,CategoryId) = 1 then CategoryId else 0 end MainCategoryIdGSO12
+		,	case when rank() over(partition by UserAccountId order by QuantityOrder12Months desc,CategoryId) = 1 then CategoryId else 0 end MainCategoryIdQO12
+		,	case when rank() over(partition by UserAccountId order by GrossSalesSale12Months desc,CategoryId) = 1 then CategoryId else 0 end MainCategoryIdGSS12
+		,	case when rank() over(partition by UserAccountId order by QuantitySale12Months desc,CategoryId) = 1 then CategoryId else 0 end MainCategoryIdQS12
+		,	case when rank() over(partition by UserAccountId order by GrossSalesOrder6Months desc,CategoryId) = 1 then CategoryId else 0 end MainCategoryIdGSO6
+		,	case when rank() over(partition by UserAccountId order by QuantityOrder6Months desc,CategoryId) = 1 then CategoryId else 0 end MainCategoryIdQO6
+		,	case when rank() over(partition by UserAccountId order by GrossSalesSale6Months desc,CategoryId) = 1 then CategoryId else 0 end MainCategoryIdGSS6
+		,	case when rank() over(partition by UserAccountId order by QuantitySale6Months desc,CategoryId) = 1 then CategoryId else 0 end MainCategoryIdQS6
+		,	case when rank() over(partition by UserAccountId order by LastDateOrder desc,CategoryId) = 1 then CategoryId else 0 end CategoryIdLastOrder
+		,	case when rank() over(partition by UserAccountId order by LastDateSale desc,CategoryId) = 1 then CategoryId else 0 end CategoryIdLastSale
+		from 
+		(
+			select 
+				UserAccountId
+			,	CategoryId
+			,	sum(GrossSalesOrderTotal) GrossSalesOrderTotal
+			,	sum(QuantityOrderTotal) QuantityOrderTotal
+			,	sum(GrossSalesSaleTotal) GrossSalesSaleTotal
+			,	sum(QuantitySaleTotal) QuantitySaleTotal	
+				
+			,	sum(GrossSalesOrder12Months) GrossSalesOrder12Months
+			,	sum(QuantityOrder12Months) QuantityOrder12Months
+			,	sum(GrossSalesSale12Months) GrossSalesSale12Months
+			,	sum(QuantitySale12Months) QuantitySale12Months
+			
+			,	sum(GrossSalesOrder6Months) GrossSalesOrder6Months
+			,	sum(QuantityOrder6Months) QuantityOrder6Months
+			,	sum(GrossSalesSale6Months) GrossSalesSale6Months
+			,	sum(QuantitySale6Months) QuantitySale6Months
+			,	max(LastDateOrder) LastDateOrder
+			,	max(LastDateSale) LastDateSale	
+			from #UserAccountCategories
+			group by 1,2
+		) x
+		
+	) y
+	group by 1
+) z3
+on z1.UserAccountId = z3.UserAccountId
+inner join
+(
+	select 
+		UserAccountId
+	,	max(MainSubcategoryIdGSOTotal) MainSubcategoryIdGSOTotal
+	,	max(MainSubcategoryIdQOTotal) MainSubcategoryIdQOTotal
+	,	max(MainSubcategoryIdGSSTotal) MainSubcategoryIdGSSTotal
+	,	max(MainSubcategoryIdQSTotal) MainSubcategoryIdQSTotal
+	,	max(MainSubcategoryIdGSO12) MainSubcategoryIdGSO12
+	,	max(MainSubcategoryIdQO12) MainSubcategoryIdQO12
+	,	max(MainSubcategoryIdGSS12) MainSubcategoryIdGSS12
+	,	max(MainSubcategoryIdQS12) MainSubcategoryIdQS12
+	,	max(MainSubcategoryIdGSO6) MainSubcategoryIdGSO6
+	,	max(MainSubcategoryIdQO6) MainSubcategoryIdQO6
+	,	max(MainSubcategoryIdGSS6) MainSubcategoryIdGSS6
+	,	max(MainSubcategoryIdQS6) MainSubcategoryIdQS6
+	,	max(SubcategoryIdLastOrder) SubcategoryIdLastOrder
+	,	max(SubcategoryIdLastSale) SubcategoryIdLastSale
+	from 
+	(
+		select
+			UserAccountId
+		,	case when rank() over(partition by UserAccountId order by GrossSalesOrderTotal desc,SubcategoryId) = 1 then SubcategoryId else 0 end MainSubcategoryIdGSOTotal
+		,	case when rank() over(partition by UserAccountId order by QuantityOrderTotal desc,SubcategoryId) = 1 then SubcategoryId else 0 end MainSubcategoryIdQOTotal
+		,	case when rank() over(partition by UserAccountId order by GrossSalesSaleTotal desc,SubcategoryId) = 1 then SubcategoryId else 0 end MainSubcategoryIdGSSTotal
+		,	case when rank() over(partition by UserAccountId order by QuantitySaleTotal desc,SubcategoryId) = 1 then SubcategoryId else 0 end MainSubcategoryIdQSTotal
+		,	case when rank() over(partition by UserAccountId order by GrossSalesOrder12Months desc,SubcategoryId) = 1 then SubcategoryId else 0 end MainSubcategoryIdGSO12
+		,	case when rank() over(partition by UserAccountId order by QuantityOrder12Months desc,SubcategoryId) = 1 then SubcategoryId else 0 end MainSubcategoryIdQO12
+		,	case when rank() over(partition by UserAccountId order by GrossSalesSale12Months desc,SubcategoryId) = 1 then SubcategoryId else 0 end MainSubcategoryIdGSS12
+		,	case when rank() over(partition by UserAccountId order by QuantitySale12Months desc,SubcategoryId) = 1 then SubcategoryId else 0 end MainSubcategoryIdQS12
+		,	case when rank() over(partition by UserAccountId order by GrossSalesOrder6Months desc,SubcategoryId) = 1 then SubcategoryId else 0 end MainSubcategoryIdGSO6
+		,	case when rank() over(partition by UserAccountId order by QuantityOrder6Months desc,SubcategoryId) = 1 then SubcategoryId else 0 end MainSubcategoryIdQO6
+		,	case when rank() over(partition by UserAccountId order by GrossSalesSale6Months desc,SubcategoryId) = 1 then SubcategoryId else 0 end MainSubcategoryIdGSS6
+		,	case when rank() over(partition by UserAccountId order by QuantitySale6Months desc,SubcategoryId) = 1 then SubcategoryId else 0 end MainSubcategoryIdQS6
+		,	case when rank() over(partition by UserAccountId order by LastDateOrder desc,SubcategoryId) = 1 then SubcategoryId else 0 end SubcategoryIdLastOrder
+		,	case when rank() over(partition by UserAccountId order by LastDateSale desc,SubcategoryId) = 1 then SubcategoryId else 0 end SubcategoryIdLastSale
+		from 
+		(
+			select 
+				UserAccountId
+			,	SubcategoryId
+			,	sum(GrossSalesOrderTotal) GrossSalesOrderTotal
+			,	sum(QuantityOrderTotal) QuantityOrderTotal
+			,	sum(GrossSalesSaleTotal) GrossSalesSaleTotal
+			,	sum(QuantitySaleTotal) QuantitySaleTotal	
+				
+			,	sum(GrossSalesOrder12Months) GrossSalesOrder12Months
+			,	sum(QuantityOrder12Months) QuantityOrder12Months
+			,	sum(GrossSalesSale12Months) GrossSalesSale12Months
+			,	sum(QuantitySale12Months) QuantitySale12Months
+			
+			,	sum(GrossSalesOrder6Months) GrossSalesOrder6Months
+			,	sum(QuantityOrder6Months) QuantityOrder6Months
+			,	sum(GrossSalesSale6Months) GrossSalesSale6Months
+			,	sum(QuantitySale6Months) QuantitySale6Months
+			,	max(LastDateOrder) LastDateOrder
+			,	max(LastDateSale) LastDateSale	
+			from #UserAccountCategories
+			group by 1,2
+		) x
+		
+	) y
+	group by 1
+) z4
+on z1.UserAccountId = z4.UserAccountId  
+;
+truncate table  reports.UserAccountMainCategories
+;
+insert into reports.UserAccountMainCategories
+select * from #UserAccountMainCategories
+; 
+
+
+
+

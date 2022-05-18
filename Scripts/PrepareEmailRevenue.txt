@@ -1,0 +1,251 @@
+--criar temporaria com os novos registros;
+drop table if exists mailingpurchase_;
+create temporary table mailingpurchase_(
+mailingid int4,
+purchaseid int4,
+pageid int4,
+trans int4,
+relac int4,
+trans_relac int4,
+UtmSource varchar(255),
+UtmCampaign varchar(255)
+)
+diststyle key
+distkey (mailingid)
+sortkey (mailingid, purchaseid);
+
+--inserir os registros novos;
+insert into mailingpurchase_(
+							mailingid,
+							purchaseid,
+							pageid,
+							trans,
+							relac,
+							trans_relac,
+							UtmSource,
+							UtmCampaign
+							)
+select distinct case when pur.LandingPageUrl ilike '%mailingid%' then (case when ((NULLIF(pur.LandingPageUrl,'') = '') or (LTRIM(pur.LandingPageUrl)='') or (regexp_substr(pur.landingpageurl,'mailing[iI][dD]=[0-9]+') = '')) then 0 else cast(
+	    regexp_substr(
+	     regexp_substr(
+	      pur.landingpageurl,
+	      'mailing[iI][dD]=[0-9]+'
+	     ),
+	     '[0-9]+'
+	    ) as int
+	   ) end) else 0 end mailingid
+	   ,pur.purchaseid
+	   ,s.salespageid pageid
+	   ,case when pur.LandingPageUrl ilike '%transacional%' then 1 else 0 end trans
+	   ,case when pur.LandingPageUrl ilike '%relacional%' then 1 else 0 end relac
+	   ,case when (pur.LandingPageUrl ilike '%relacional%' or pur.LandingPageUrl ilike '%transacional%') then 1 else 0 end trans_relac
+	   ,cast(LEFT (NULLIF(REGEXP_SUBSTR (REGEXP_SUBSTR (case
+		when CHARINDEX('push:{',pur.LandingPageUrl) > 0 or
+			pur.LandingPageUrl = 'push' 
+		then 'https://www.peixeurbano.com.br/?utm_source=push&utm_medium=push'
+		when CHARINDEX('%',pur.LandingPageUrl) > 0
+		then replace(replace(replace(pur.LandingPageUrl,'%3D','='),'%26','&'),'%20','_')
+		else pur.LandingPageUrl
+	end,'utm_source=[^&]*'),'[^=]*$'),''),255) as varchar(255)) UtmSource
+	,cast(LEFT (NULLIF(REGEXP_SUBSTR (REGEXP_SUBSTR (case
+		when CHARINDEX('push:{',pur.LandingPageUrl) > 0 or
+			pur.LandingPageUrl = 'push' 
+		then 'https://www.peixeurbano.com.br/?utm_source=push&utm_medium=push'
+		when CHARINDEX('%',pur.LandingPageUrl) > 0
+		then replace(replace(replace(pur.LandingPageUrl,'%3D','='),'%26','&'),'%20','_')
+		else pur.LandingPageUrl
+	end,'utm_campaign=[^&]*'),'[^=]*$'),''),255) as varchar(255)) UtmCampaign
+	   from reports.vw_purchaserevenue s
+		inner join ods.purchase pur 
+		on pur.purchaseid = s.purchaseid and pur.LandingPageUrl ilike '%mailingid%'
+		left join reports.mailingpurchase pm on pm.purchaseid = s.purchaseid
+		where orderdate > '2016-12-21' and pm.purchaseid is null;
+
+		
+--verifica duplicidade e apaga;
+delete 
+	from reports.mailingpurchase
+	where purchaseid in (select purchaseid from reports.mailingpurchase pm GROUP by purchaseid having count(0) > 1);
+	
+--inserir novos registros final;
+insert into reports.mailingpurchase(
+								mailingid,
+								purchaseid,
+								pageid,
+								trans,
+								relac,
+								trans_relac,
+								UtmSource,
+								UtmCampaign,
+								Campaign
+								)
+select distinct
+	 pm.mailingid
+	,pm.purchaseid
+	,pm.pageid
+	,pm.trans
+	,pm.relac
+	,trans_relac
+	,COALESCE(c.utmsource, pm.UtmSource) UtmSource
+	,COALESCE(c.utmcampaign,pm.UtmCampaign) UtmCampaign
+	,COALESCE(m.name,COALESCE(m02.name,pm.UtmCampaign)) Campaign
+from  mailingpurchase_ pm
+		--mailing
+		left join ods.mailing m on m.mailingid = pm.mailingid and pm.trans_relac = 0
+		left join alicanto.campaignscheduling cs on m.mailingid = cs.mailingid
+		left join alicanto.campaignschedulingconfig csc on cs.schedulingconfigid = csc.schedulingconfigid
+		left join alicanto.campaign c on c.campaignid = csc.campaignid
+		--mailing transacional e relacional
+		left join ods.mailing02 m02 on m02.mailingid = pm.mailingid  and pm.trans_relac = 1;
+
+--verifica duplicidade e apaga;
+delete 
+	from reports.mailingpurchasecampaign
+	where mailingid in (select mailingid from reports.mailingpurchasecampaign GROUP by mailingid having count(0) > 1);
+	
+--inserir novos registros;
+INSERT INTO reports.mailingpurchasecampaign(mailingid, pageid, trans, relac, trans_relac, utmcampaign, utmsource, campaign)
+select  s.mailingid
+	   ,max(s.pageid) pageid
+	   ,max(s.trans) trans
+	   ,max(s.relac) relac
+	   ,max(s.trans_relac) trans_relac
+	   ,max(s.UtmCampaign) UtmCampaign
+	   ,max(s.UtmSource) UtmSource
+	   ,max(s.Campaign) Campaign
+		from reports.mailingpurchase s
+			left join reports.mailingpurchasecampaign mpc on mpc.mailingid = s.mailingid
+		where mpc.mailingid is null 
+		group by 1;
+
+
+drop table if exists #EmailRevenue;
+
+select
+	Campaign	
+,   y.EmailType
+,	sentdate
+,	case when sentdate is not null then 1 else 0 end  isValidDate
+,	pg.PageName
+,	pg.PageId
+,	UnifiedDiscountId
+,	case when sentdate is not null then '20' + sentyear else null end sentyear
+,	case when sentdate is not null then 
+		sentmonth 
+	else null end sentmonth
+,	case when sentdate is not null then sentday else null end sentday
+,	QTYTransactions
+,	GrossSales
+,	EventDate SaleDate
+,	cast(null as int) slotorder 
+,	GrossSalesPUCommission
+,	OrderValue 
+,	QTYOrder
+,	gmv
+,	grossprofit
+,	y.channelid
+into #EmailRevenue
+from
+	(
+		select 
+			case when pur.sourceid in (4,5,6) then 6 else 1 end channelid
+		,   replace(replace(COALESCE(pm.Campaign,UtmCampaignLandingPageUrl),'"',''),'+','') Campaign
+		,	case 
+				when substring(utmtermlandingpageurl,3,1) = '-' 
+				and substring(utmtermlandingpageurl,6,1) = '-'
+				then cast('20' + substring(utmtermlandingpageurl,1,8) as date ) 
+				else null
+			end sentdate
+		,	substring(utmtermlandingpageurl,1,2) sentyear
+		,	substring(utmtermlandingpageurl,4,2) sentmonth
+		,	substring(utmtermlandingpageurl,7,2) sentday
+		,	revenuedate EventDate
+		,	UnifiedDiscountId
+		,	salespageid as pageid
+		,   max(
+			case 
+				when (((UtmCampaignLandingPageUrl ilike '%produtos%' 
+				or UtmCampaignLandingPageUrl ilike '%especial%' 
+				or (UtmCampaignLandingPageUrl ilike '%viagen%' 
+				or UtmCampaignLandingPageUrl ilike '%viagem%')
+				or pm.UtmCampaign ilike '%produtos%' 
+				or pm.UtmCampaign ilike '%especial%' 
+				or (pm.UtmCampaign ilike '%viagen%' or pm.UtmCampaign ilike '%viagem%')
+				or pm.Campaign ilike '%produtos%' 
+				or pm.Campaign ilike '%especial%' 
+				or (pm.Campaign ilike '%viagen%' or pm.Campaign ilike '%viagem%')) 
+				and (utmsourcelandingpageurl ilike '%mailfish%' or pm.UtmSource ilike '%mailfish%'))
+				or (UtmCampaignLandingPageUrl ilike '%especial%' or pm.UtmCampaign ilike '%especial%' or pm.Campaign ilike '%especial%')) then 'Especial'
+				when ((UtmCampaignLandingPageUrl ilike '%produto%' or pm.UtmCampaign ilike '%produto%' or pm.Campaign ilike '%produto%')  /*and utmsourcelandingpageurl ilike '%EmailNews%'*/) then 'Produtos'
+				when ((UtmCampaignLandingPageUrl ilike '%régua%' or pm.UtmCampaign ilike '%régua%' or pm.Campaign ilike '%régua%') /*and utmsourcelandingpageurl ilike '%mailfish%'*/) then 'Régua'
+				when ((UtmCampaignLandingPageUrl ilike '%viagen%' or pm.UtmCampaign ilike '%viagen%' or UtmCampaignLandingPageUrl ilike '%viagem%' or pm.UtmCampaign ilike '%viagem%' or pm.Campaign ilike '%viagen%' or pm.Campaign ilike '%viagem%') /*and utmsourcelandingpageurl ilike '%EmailNews%'*/) then 'Viagens'
+				when ((UtmCampaignLandingPageUrl ilike '%bebes%' or pm.UtmCampaign ilike '%bebes%' or pm.Campaign ilike '%bebes%') /*and utmsourcelandingpageurl ilike '%EmailNews%'*/) then 'Bebes'
+				when (((UtmCampaignLandingPageUrl ilike '%Daily Deal%') or (pm.UtmCampaign ilike '%Daily Deal%') or (pm.Campaign ilike '%Daily Deal%') or (UtmCampaignLandingPageUrl ilike '%Groupon DD%' or (pm.UtmCampaign ilike '%Groupon DD%') or (pm.Campaign ilike '%Groupon DD%') or (UtmCampaignLandingPageUrl ilike '%DD Groupon%') or (pm.UtmCampaign ilike '%DD Groupon%') or (pm.Campaign ilike '%DD Groupon%'))) /*and utmsourcelandingpageurl ilike '%EmailNews%'*/) then 'DailyDeal (Local)'
+				when (utmsourcelandingpageurl ilike '%transacional%' or pur.LandingPageUrl ilike '%transacional%' or pm.trans = 1 or pm.UtmCampaign ilike '%transacional%') then 'Transacional'
+				when (utmsourcelandingpageurl ilike '%relacional%' or pur.LandingPageUrl ilike '%relacional%' or pm.relac = 1 or pm.UtmCampaign ilike '%relacional%') then 'Relacional'
+				/*when ((nullif(m.name,UtmCampaignLandingPageUrl) ilike '%agendamento-local%'
+						or nullif(m.name,UtmCampaignLandingPageUrl) ilike  '%alteracao-de-senha%'
+						or nullif(m.name,UtmCampaignLandingPageUrl) ilike  '%avalie-sua-experiencia%'
+						or nullif(m.name,UtmCampaignLandingPageUrl) ilike  '%baixe-o-app-android%'
+						or nullif(m.name,UtmCampaignLandingPageUrl) ilike  '%baixe-o-app-ios%'
+						or nullif(m.name,UtmCampaignLandingPageUrl) ilike  '%bem-vindo%'
+						or nullif(m.name,UtmCampaignLandingPageUrl) ilike  '%carrinho-abandonado%'
+						or nullif(m.name,UtmCampaignLandingPageUrl) ilike  '%confirmacao-de-email%'
+						or nullif(m.name,UtmCampaignLandingPageUrl) ilike  '%credito_por_cancelamento_cupom_app_autorizado%'
+						or nullif(m.name,UtmCampaignLandingPageUrl) ilike  '%credito_por_cancelamento_cupom_app_nao_autorizado%'
+						or nullif(m.name,UtmCampaignLandingPageUrl) ilike  '%cupom_local%'
+						or nullif(m.name,UtmCampaignLandingPageUrl) ilike  '%cupom-a-expirar%'
+						or nullif(m.name,UtmCampaignLandingPageUrl) ilike  '%cupom-presente%'
+						or nullif(m.name,UtmCampaignLandingPageUrl) ilike  '%enviodesenha%'
+						or nullif(m.name,UtmCampaignLandingPageUrl) ilike  '%indicacao_por_usuario%'
+						or nullif(m.name,UtmCampaignLandingPageUrl) ilike  '%lembrarsenha%'
+						or nullif(m.name,UtmCampaignLandingPageUrl) ilike  '%loginporemail%'
+						or nullif(m.name,UtmCampaignLandingPageUrl) ilike  '%novo-login-em-device%'
+						or nullif(m.name,UtmCampaignLandingPageUrl) ilike  '%novo-usuario%'
+						or nullif(m.name,UtmCampaignLandingPageUrl) ilike  '%pagamento-aprovado%'
+						or nullif(m.name,UtmCampaignLandingPageUrl) ilike  '%pagamento-cancelado%'
+						or nullif(m.name,UtmCampaignLandingPageUrl) ilike  '%pagamento-nao-processado%'
+						or nullif(m.name,UtmCampaignLandingPageUrl) ilike  '%pedido-cancelado%'
+						or nullif(m.name,UtmCampaignLandingPageUrl) ilike  '%pedido-recebido%'
+						or nullif(m.name,UtmCampaignLandingPageUrl) ilike  '%pedido-recebido-boleto%'
+						or nullif(m.name,UtmCampaignLandingPageUrl) ilike  '%pedido-recebido-boleto2%'
+						or nullif(m.name,UtmCampaignLandingPageUrl) ilike  '%produto-aguardando-envio%'
+						or nullif(m.name,UtmCampaignLandingPageUrl) ilike  '%produto-entregue%'
+						or nullif(m.name,UtmCampaignLandingPageUrl) ilike  '%produto-enviado%'
+						or nullif(m.name,UtmCampaignLandingPageUrl) ilike  '%produto-pendente%'
+						or nullif(m.name,UtmCampaignLandingPageUrl) ilike  '%reserva-confirmada%'
+						or nullif(m.name,UtmCampaignLandingPageUrl) ilike  '%resetsenha%'
+						or nullif(m.name,UtmCampaignLandingPageUrl) ilike  '%resposta-parceiro%'
+						or nullif(m.name,UtmCampaignLandingPageUrl) ilike  '%welcome_45707%') and utmsourcelandingpageurl ilike '%transacional%') then 'Transacional'
+				when ((nullif(m.name,UtmCampaignLandingPageUrl) ilike  '%recuperacao-de-navegacao%'
+						or nullif(m.name,UtmCampaignLandingPageUrl) ilike  '%recuperacao-de-navegacao-categoria%'
+						or nullif(m.name,UtmCampaignLandingPageUrl) ilike  '%recuperacao-de-navegacao-semanal%') and utmsourcelandingpageurl ilike '%relacional%') then 'Relacional'*/
+				else 'Outros' 
+			end) EmailType
+		,	sum(grosssales) GrossSales
+		,	count(distinct case when s.grosssales > 0 then s.purchaseid else null end) QTYTransactions
+		,	cast(sum(GrossSalesPUCommission)  as decimal(18,2)) GrossSalesPUCommission
+		,	sum(orderCouponsValue) OrderValue 
+		,	count(distinct case when ordertotalvalue > 0 then s.purchaseid else null end) QTYOrder
+		,	cast(sum(gmv) as decimal(18,2)) gmv
+		,	cast(sum(grossprofit) as decimal(18,2)) grossprofit
+		from reports.vw_purchaserevenue s
+		inner join ods.purchase pur on pur.purchaseid = s.purchaseid
+		inner join reports.PurchaseUrl pu on s.PurchaseId = pu.PurchaseId and utmmediumlandingpageurl ilike 'email%'
+		--mailings
+		left join reports.mailingpurchase pm on pm.purchaseid = s.purchaseid
+		where orderdate > '2016-12-21'
+		group by 1,2,3,4,5,6,7,8,9
+) y
+left join ods.page pg
+--on y.campaign = pg.urlformattedname
+on y.pageid = pg.pageid
+and pg.channelid = 1;
+
+delete from reports.EmailRevenue;
+
+insert into reports.EmailRevenue(campaign,emailtype,sentdate,validdate,pagename,pageid,unifieddiscountid,sentyear,sentmonth,sentday,qtytransactions,grosssales,saledate,slotorder,grosssalespucommission,ordervalue,qtyorder,gmv,grossprofit,channelid)
+select  campaign,emailtype,sentdate,isValidDate as validdate,pagename,pageid,unifieddiscountid,sentyear,sentmonth,sentday,qtytransactions,grosssales,saledate,slotorder,grosssalespucommission,ordervalue,qtyorder,gmv,grossprofit,channelid 
+from #EmailRevenue;
+
+commit;

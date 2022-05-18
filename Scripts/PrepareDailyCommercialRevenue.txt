@@ -1,0 +1,965 @@
+drop table if exists #Carga ;
+drop table if exists #DailyCommercialRevenue;
+drop table if exists #CommercialAchievement;
+
+
+   
+
+select
+	1 "DataSource"
+,	EventDate
+,	DiscountID
+,	UnifiedDiscountID
+,	sum(QTYCoupons) QtyCoupons
+,	sum(GrossSales) GrossSales
+,	sum(GrossSalesPUCommission) GrossSalesPUCommission
+,	sum(CancelledPosBillingpu) CancelledPosBilling
+,	sum(CancelledPreBilling) CancelledPreBilling
+,	sum(CancelledPreBillingPU) CancelledPreBillingPU
+,	sum(NoShow) NoShow
+
+into #Carga
+
+from reports.DiscountRevenue
+where EventDate between (select case when datepart(day,getdate()) = 1 then dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date)) else cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date) end )
+and  (select case when datepart(day,getdate()) = 1 then dateadd(day,-1,dateadd(month,1,dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date))))	else cast(dateadd(day, -1,getdate()) as date) end )
+and sourceid in (1, 2, 3) --filtro apenas para ofertas do site PU
+group by
+	EventDate
+,	DiscountID
+,	UnifiedDiscountID
+
+;
+
+---
+
+select *
+into #DailyCommercialRevenue
+from
+(
+	select 
+		dr.EventDate
+	,	date_part(year,dr.EventDate) EventYear
+	,	date_part(month,dr.EventDate) EventMonth
+	,	date_part(day,dr.EventDate) EventDay
+	,	case
+			when AM.CurrentSalesExecutiveName IS NOT NULL THEN AM.CurrentSalesExecutiveName
+			when func.Name is not null then func.Name
+			when u.UserName is not null then u.UserName
+			when rp.RepresentantName = 'Marcelo Cabreira' then u.UserName else rp.RepresentantName 
+		end "Owner"
+	,	coalesce(ownerE.OwnerERP,'Em tratamento') OwnerERP
+	,	coalesce(t.Coordinator,'Em tratamento') Coordinator
+	,	coalesce(t.ManagerName,'Em tratamento') Manager
+	,	coalesce(ot.Region,'Em tratamento') Region
+	,	coalesce(ot.Team,'Em tratamento') Team
+	,	udis.ContractID
+	,	dr.UnifiedDiscountID
+--	,	replace(replace(ndis.DiscountName,CHAR(13),''),CHAR(10),'') DiscountName
+	,	ndis.DiscountName
+
+	,	case when offer.Name is not null then offer.Name else null end IdOferta
+	,	case when op.Name is not null then op.Name else null end PurchaseOption
+
+	--,	case 
+	--		when u.UserName is not null then u.UserName
+	--		when func.name is not null then func.name 
+	--	end newName
+
+	,	acc.AccountID
+	,	acc.AccountName
+	,	case
+			when con.Category in	('Entretenimento','Entretenimento, Cultura e Vida Noturna','Entretenimento, Cultuta e Vida Noturna','Lazer')
+			then 'Entret. & Lazer'
+			else con.Category
+		end  CategoryName
+	,	dis.DiscountedValue
+	,	cast(sum(dr.QTYCoupons )as int) QtyCoupons
+	,	cast(dis.OurCommission as decimal(15,2)) OurCommission
+	,	sum(dr.GrossSales) GrossSales
+	,	sum(dr.GrossSalesPUCommission) GrossSalesPUCommission
+	,	sum(case when mdis.MinEventDate >= '2012-08-01' then dr.CancelledPosBilling else 0 end) CommercialCancelledPosBilling
+	,	sum(dr.CancelledPreBilling) CancelledPreBilling
+	,	sum(dr.CancelledPreBillingPU) CancelledPreBillingPU
+	,	sum(dr.NoShow) NoShow
+	
+-- Case necessario para contemplar os ajustes de comiss?o para contratos
+	-- das contas Coco Bambu cujo o valor deve ser igual a 0.1 (10%)
+	,	cast(
+			sum(
+				case
+					when udis.contractid = '165067' then (dr.GrossSales * -0.86)   -- Camarote Salvador 
+					when dc.discountcategoryid = 2 then 0  
+					when udis.ContractID = adjust.contract
+					  then	case 
+								when AccountStatusPublication in ('Ativa??o','Reativa??o') then dr.GrossSalesPUCommission*0.2 
+								else 0 --dr.GrossSalesPUCommission
+							end + dr.GrossSales * 0.05  
+					  else	case 
+								when AccountStatusPublication in ('Ativa??o','Reativa??o') then dr.GrossSalesPUCommission*0.2 
+								else 0 --dr.GrossSalesPUCommission
+							end
+				end
+				) 
+		as decimal(15,2)) Adjustment
+	,	coalesce(con.DealsClub,0) DealsClub
+	,	con.PaymentCondition
+	,	con.PaymentConditionName
+	,	coalesce(con.Subdivision,'N?o tem') Subdivision
+	,	con.Type_Site
+	,	case 
+			when len(op.categoria_site_oferta) > 1 or op.categoria_site_oferta is not null then op.categoria_site_oferta
+			when len(offer.of_categoria_site) > 1 or offer.of_categoria_site is not null then offer.of_categoria_site
+			else con.Category_Site
+		end "Category_Site"
+	,	case 
+			when len(op.subcategoria_site_oferta) > 1 or op.subcategoria_site_oferta is not null then op.subcategoria_site_oferta
+			when len(offer.of_categoria_site) > 1 or offer.of_categoria_site is not null then offer.of_categoria_site
+			else con.SubCategory_Site
+		end	"SubCategory_Site"
+	,	coalesce(con.UseNow,0) UseNow
+	,	con.DealCity
+
+	from #Carga dr
+
+	left join ods.Discount dis (nolock)
+	on dis.DiscountID = dr.DiscountID
+
+	left join ods.UnifiedDiscount udis (nolock)
+	on dr.UnifiedDiscountID = udis.UnifiedDiscountID
+
+	left join reports.cocobambuContract adjust
+	on udis.contractid = adjust.contract
+
+	left join reports.discountcategory dc 
+	on dc.discountcategoryid = dis.discountcategoryid
+
+
+	-- Modelo novo de contrato
+	
+	left join salesforce.ctOp_es_de_Compra op (nolock)
+		on  op.C_digo_Opcao_N_merico = dis.IdOpcaoDeCompra
+
+	left join salesforce.ctOfertas offer (nolock)
+		on offer.Id = op.Id_da_Oferta
+
+	left join salesforce.ctOfertas offer2 (nolock)
+	  on offer2.c_digo_oferta_num_rico = udis.Idoferta
+
+	left join salesforce.ctcontratopu contratoPU (nolock)
+		on udis.ContractId = right(contratoPU.Name, 6)
+	
+	---- / Informa??es Complementares Novo Modelo de Contrato
+
+	-- / Modelo novo de contrato
+
+	left join
+	(
+		select
+			dis.UnifiedDiscountID
+		,	min(DiscountName) DiscountName
+
+		from ods.Discount dis (nolock)
+
+		group by
+			dis.UnifiedDiscountID
+	) ndis
+	on dr.UnifiedDiscountID = ndis.UnifiedDiscountID 
+
+	left join reports.Contract con (nolock)
+	on con.ContractId = udis.ContractID
+	
+	left join reports.Account acc (nolock)
+	on acc.AccountID = con.AccountID
+	
+	left join reports.AccountPublication ap (nolock)
+	on acc.AccountID = ap.AccountID
+
+	left join reports.UnifiedDiscountCategory udc (nolock)
+	on udc.UnifiedDiscountID = dr.UnifiedDiscountID
+
+	left join reports.Category ct (nolock)
+	on ct.CategoryID = udc.CategoryID
+
+	left join
+	(
+		select
+			dis.UnifiedDiscountID
+		,	min(dis.RepresentantID) RepresentantID
+
+		from ods.Discount dis (nolock)
+
+		group by
+			dis.UnifiedDiscountID
+		) urp
+	on urp.UnifiedDiscountID = dr.UnifiedDiscountID
+
+	left join ods.Representant rp (nolock)
+	on rp.RepresentantID = urp.RepresentantID
+
+	left join
+	(
+		select
+			dis.UnifiedDiscountID
+		,	min(dr.EventDate) MinEventDate
+		from reports.DiscountRevenue dr (nolock)
+		left join ods.Discount dis
+		on dr.DiscountID = dis.DiscountID
+		where dr.GrossSales > 0
+			and dr.sourceid in (1, 2, 3) --filtro apenas para ofertas do site PU
+		group by
+			dis.UnifiedDiscountID
+		) mdis
+	on mdis.UnifiedDiscountID = dr.UnifiedDiscountID
+	
+	
+	-- Modelo novo de Contrato
+
+	left join salesforce.ctCadastro_de_Funcion_rios func (nolock)
+		on	case
+				when op.ID_Propriet_rio_Final is not null then op.ID_Propriet_rio_Final 
+				when offer2.Propriet_rio_Compartilhado is not null then left(offer2.Propriet_rio_Compartilhado,15)
+				when contratoPU.Propriet_rio_compartilhado is not null then left(contratoPU.Propriet_rio_compartilhado, 15) 
+				else left(contratoPU.Propriet_rio_ID, 15) 
+			end = left(func.Id, 15)
+	/*left join salesforce.ctCadastro_de_Funcion_rios func (nolock)
+		on	case
+				when op.ID_Propriet_rio_Final is not null then cast(op.ID_Propriet_rio_Final as binary)
+				when contratoPU.Propriet_rio_compartilhado is not null then cast(left(contratoPU.Propriet_rio_compartilhado, 15) as binary)
+				else cast(left(contratoPU.Propriet_rio_ID, 15) as binary)
+			end = cast(left(func.Id, 15) as binary)
+*/
+--	left join salesforce.ctCadastro_de_Funcion_rios func (nolock)
+--		on cast(left(func.Id, 15) as binary) = cast(op.ID_Propriet_rio_Final as binary)
+
+	left join reports.user u (nolock)
+		on (contratoPU.Propriet_rio_ID = u.userid or contratoPU.Propriet_rio_ID = left(u.userid, 15))
+
+	-- / Modelo novo de Contrato
+
+	-- Migra??o de Contratos
+	LEFT JOIN
+	(
+		SELECT 
+			T1.ContractId,
+			T1.MigrationId,
+			T2.CurrentSalesExecutiveName
+		FROM
+		(
+			SELECT ContractId, MAX(MigrationId) MigrationId
+			FROM reports.ContractMigration (nolock)
+			WHERE MigrationDate < (select case when datepart(day,getdate()) = 1 then dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date)) else cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date) end )
+			GROUP BY ContractId 
+		) T1
+	
+		INNER JOIN reports.ContractMigration T2 (nolock)
+		ON T1.ContractId = T2.ContractId
+		AND T1.MigrationId = T2.MigrationId
+	
+	) AM
+	ON udis.ContractId = AM.ContractId
+	-- / Migra??o de Contratos
+
+	left join reports.OwnerERP ownerE (nolock)
+		on case 
+			when AM.CurrentSalesExecutiveName IS NOT NULL THEN Upper(AM.CurrentSalesExecutiveName)
+			when func.Name IS NOT NULL THEN Upper(func.Name)
+			when u.UserName is not null then Upper(u.UserName)
+			when rp.RepresentantName = 'Marcelo Cabreira' then Upper(u.UserName)
+			else Upper(rp.RepresentantName) 
+		   end = Upper(ownerE."Owner")
+
+	left join reports.OwnerTeam ot (nolock)
+	on Upper(ownerE.OwnerERP) = Upper(ot.OwnerERP)
+
+	left join reports.Team t (nolock)
+	on ot.Team = t.Team
+	
+	
+	group by
+		dr.EventDate
+	,	date_part(year,dr.EventDate)
+	,	date_part(month,dr.EventDate)
+	,	date_part(day,dr.EventDate)
+	,	case
+			when AM.CurrentSalesExecutiveName IS NOT NULL THEN AM.CurrentSalesExecutiveName
+			when func.Name is not null then func.Name
+			when u.UserName is not null then u.UserName
+			when rp.RepresentantName = 'Marcelo Cabreira' then u.UserName else rp.RepresentantName
+		end
+	,	coalesce(ownerE.OwnerERP,'Em tratamento')
+	,	coalesce(t.Coordinator,'Em tratamento')
+	,	coalesce(t.ManagerName,'Em tratamento')
+	,	coalesce(ot.Region,'Em tratamento')
+	,	coalesce(ot.Team,'Em tratamento')
+	,	udis.ContractID
+	,	dr.UnifiedDiscountID
+	--,	replace(replace(ndis.DiscountName,CHAR(13),''),CHAR(10),'')
+	,ndis.DiscountName
+
+	,	case when offer.Name is not null then offer.Name else null end
+	,	case when op.Name is not null then op.Name else null end
+
+	--,	case 
+	--		when u.UserName is not null then u.UserName
+	--		when func.name is not null then func.name 
+	--	end
+
+	,	acc.AccountID
+	,	acc.AccountName
+	,	case
+			when con.Category in
+	('Entretenimento','Entretenimento, Cultura e Vida Noturna','Entretenimento, Cultuta e Vida Noturna','Lazer')
+			then 'Entret. & Lazer'
+			else con.Category
+		end
+	,	dis.DiscountedValue
+	,	cast(dis.OurCommission as decimal(15,2))
+	,	coalesce(con.DealsClub,0)
+	,	con.PaymentCondition
+	,	con.PaymentConditionName
+	,	coalesce(con.Subdivision,'N?o tem')
+	,	con.Type_Site
+	,	case 
+			when len(op.categoria_site_oferta) > 1 or op.categoria_site_oferta is not null then op.categoria_site_oferta
+			when len(offer.of_categoria_site) > 1 or offer.of_categoria_site is not null then offer.of_categoria_site
+			else con.Category_Site
+		end
+	,	case 
+			when len(op.subcategoria_site_oferta) > 1 or op.subcategoria_site_oferta is not null then op.subcategoria_site_oferta
+			when len(offer.of_categoria_site) > 1 or offer.of_categoria_site is not null then offer.of_categoria_site
+			else con.SubCategory_Site
+		end
+	,	coalesce(con.UseNow,0)
+	,	con.DealCity
+
+	
+	union all
+
+	select
+
+		ca.EventDate
+	,	date_part(year,ca.EventDate) EventYear
+	,	date_part(month,ca.EventDate) EventMonth
+	,	date_part(day,ca.EventDate) EventDay
+	,	null "Owner"
+	,	ca.OwnerERP
+	,	coalesce(t.Coordinator,'Em tratamento') Coordinator
+	,	coalesce(t.ManagerName,'Em tratamento') Manager
+	,	coalesce(ot.Region,'Em tratamento') Region
+	,	coalesce(ot.Team,'Em tratamento') Team
+	,	0 ContractID
+	,	0 UnifiedDiscountID
+	,	null DiscountName
+
+	,	null IdOferta
+	,	null PurchaseOption
+
+	
+	--,	null newName
+
+	,	'000000000000000' AccountID
+	,	null AccountName
+	,	null CategoryName
+	,	0 DiscountedValue
+	,	0 QtyCoupons
+	,	0 OurCommission
+	,	0 GrossSales
+	,	0 GrossSalesPUCommission
+	,	0 CommercialCancelledPosBilling
+	,	0 CancelledPreBilling
+	,	0 CancelledPreBillingPU
+	,	0 NoShow
+	,	cast(ca.Adjustment as decimal(15,2)) Adjustment
+	,	null DealsClub
+	,	null PaymentCondition
+	,	null PaymentConditionName
+	,	null Subdivision
+	,	null Type_Site
+	,	null Category_Site
+	,	null SubCategory_Site
+	,	null UseNow
+	,	null DealCity
+
+	from reports.CommercialAdjustment ca (nolock)
+
+	left join reports.OwnerTeam ot (nolock)
+	on ca.OwnerERP = ot.OwnerERP
+
+	left join reports.Team t (nolock)
+	on ot.Team = t.Team
+	where ca.EventDate between (select case when datepart(day,getdate()) = 1 then dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date)) else cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date) end ) and (select case when datepart(day,getdate()) = 1 then dateadd(day,-1,dateadd(month,1,dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date))))	else cast(dateadd(day, -1,getdate()) as date) end )
+	
+	) x
+
+order by
+	EventDate
+,	ContractID
+;
+
+truncate table reports.DailyCommercialRevenue;
+
+insert into reports.DailyCommercialRevenue
+select * from #DailyCommercialRevenue;
+
+--select * into reports.DailyCommercialRevenue from #DailyCommercialRevenue
+
+--
+
+select
+      g."Month"
+,     g."Year"
+,     g.Goal
+,     g.Variable
+,     g."Group"
+,     coalesce(t.Manager,r.Manager) Manager
+,     coalesce(ot.Region,r.Region) Region
+,     coalesce(t.Coordinator,r.Coordinator) Coordinator
+,     coalesce(ot.Team,r.Team) Team
+,     coalesce(r.GrossSales,0) GrossSales
+,     coalesce(r.GrossSalesPUCommission,0) GrossSalesPUCommission
+,     coalesce(r.CancelledPreBillingPU,0) CancelledPreBillingPU
+,     coalesce(r.CancelledPreBilling,0) CancelledPreBilling
+,     coalesce(r.CommercialCancelledPosBilling,0) CommercialCancelledPosBilling
+,     coalesce(r.NoShow,0) NoShow
+,     coalesce(r.Adjustment,0) Adjustment
+,     coalesce(r.NetRevenueLastDay,0) NetRevenueLastDay
+,     coalesce(r.NetRevenueCity,0) NetRevenueCity
+,     date_part(day,dateadd(day,-1,dateadd(month,+1,cast(cast(g."Year" as varchar(4))+'/'+cast(g."Month" as varchar(2))+'/'+'01' as date)))) LastDay
+,     date_part(day,(select case when datepart(day,getdate()) = 1 then dateadd(day,-1,dateadd(month,1,dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date))))	else cast(dateadd(day, -1,getdate()) as date) end )) Today
+,     coalesce(r.NetRevenueCityLastDay,0) NetRevenueCityLastDay
+,     case
+		when g.Goal < 80000 then 'Menor que 80.000'
+		when g.Goal < 150000 then 'Menor que 150.000'
+		else 'Maior que 150.00' end GoalFilter
+,     coalesce(r.GoalCity,0) GoalCity
+,	  rit.Per
+,	x.ForecastGrossSalesPUCommission7
+,	x.ForecastGrossSalesPUCommission15
+,	x.ForecastGrossSalesPUCommission22
+,	x.ForecastGrossSalesPUCommission30
+,	rit.PerNext7
+into #CommercialAchievement
+from reports.Goal g
+
+left join
+(
+	select
+		date_part(month,(select case when datepart(day,getdate()) = 1 then dateadd(day,-1,dateadd(month,1,dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date))))	else cast(dateadd(day, -1,getdate()) as date) end )) "Month"
+	,	date_part(year,(select case when datepart(day,getdate()) = 1 then dateadd(day,-1,dateadd(month,1,dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date))))	else cast(dateadd(day, -1,getdate()) as date) end )) "Year"
+	,	sum(case
+				when "Date" between (select case when datepart(day,getdate()) = 1 then dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date)) else cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date) end ) and (select case when datepart(day,getdate()) = 1 then dateadd(day,-1,dateadd(month,1,dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date))))	else cast(dateadd(day, -1,getdate()) as date) end )
+				then Weight
+			end) Per
+	,	sum(case
+				when "Date" between dateadd(day,1,(select case when datepart(day,getdate()) = 1 then dateadd(day,-1,dateadd(month,1,dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date))))	else cast(dateadd(day, -1,getdate()) as date) end ))
+					and dateadd(day,7,(select case when datepart(day,getdate()) = 1 then dateadd(day,-1,dateadd(month,1,dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date))))	else cast(dateadd(day, -1,getdate()) as date) end ))
+				then Weight
+			end) PerNext7
+			
+	from reports.SeasonalGoal
+	) rit
+on g."Month" = rit."Month"
+and g."Year" = rit."Year"
+
+left join reports.OwnerTeam ot
+on g.Variable = ot.OwnerERP
+and g."Group" = 'Executivo de Vendas'
+
+left join reports.Team t
+on ot.Team = t.Team
+
+left join 
+(
+select
+      EventMonth
+,     EventYear
+,     'Cidade' "Group"
+,     'Total Geral' Manager
+,     'N/A' Region
+,     'N/A' Coordinator
+,     'N/A' Team
+,     'Total Geral' Variable
+,     sum(GrossSales) GrossSales
+,     sum(GrossSalesPUCommission) GrossSalesPUCommission
+,     sum(CancelledPreBillingPU) CancelledPreBillingPU
+,     sum(CancelledPreBilling) CancelledPreBilling
+,     sum(CommercialCancelledPosBilling) CommercialCancelledPosBilling
+,     sum(NoShow) NoShow
+,     sum(Adjustment) Adjustment
+,     cast(0 as decimal(15,2)) NetRevenueLastDay
+,     cast(0 as decimal(15,2)) NetRevenueCity
+,     cast(0 as decimal(15,2)) NetRevenueCityLastDay
+,     cast(0 as decimal(15,2)) GoalCity
+
+from reports.DailyCommercialRevenue
+where EventDate between (select case when datepart(day,getdate()) = 1 then dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date)) else cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date) end ) and (select case when datepart(day,getdate()) = 1 then dateadd(day,-1,dateadd(month,1,dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date))))	else cast(dateadd(day, -1,getdate()) as date) end )
+
+group by
+      EventMonth
+,     EventYear
+
+union all
+
+select
+      EventMonth
+,     EventYear
+,     'Cidade' "Group"
+,     Manager
+,     'N/A' Region
+,     Coordinator
+,     'Qualidade' Team
+,     Team Variable
+,     sum(GrossSales) GrossSales
+,     sum(GrossSalesPUCommission) GrossSalesPUCommission
+,     sum(CancelledPreBillingPU) CancelledPreBillingPU
+,     sum(CancelledPreBilling) CancelledPreBilling
+,     sum(CommercialCancelledPosBilling) CommercialCancelledPosBilling
+,     sum(NoShow) NoShow
+,     sum(Adjustment) Adjustment
+,     cast(0 as decimal(15,2)) NetRevenueLastDay
+,     cast(0 as decimal(15,2)) NetRevenueCity
+,     cast(0 as decimal(15,2)) NetRevenueCityLastDay
+,     cast(0 as decimal(15,2)) GoalCity
+
+from reports.DailyCommercialRevenue
+where EventDate between (select case when datepart(day,getdate()) = 1 then dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date)) else cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date) end ) and (select case when datepart(day,getdate()) = 1 then dateadd(day,-1,dateadd(month,1,dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date))))	else cast(dateadd(day, -1,getdate()) as date) end )
+
+group by
+      EventMonth
+,     EventYear
+,     Manager
+,	  Coordinator
+,     Team
+
+union all
+
+select
+      EventMonth
+,     EventYear
+,     'Regi?o' "Group"
+,     'N/A' Manager
+,     'N/A' Region
+,     'N/A' Coordinator
+,     'N/A' Team
+,     Region Variable
+,     sum(GrossSales) GrossSales
+,     sum(GrossSalesPUCommission) GrossSalesPUCommission
+,     sum(CancelledPreBillingPU) CancelledPreBillingPU
+,     sum(CancelledPreBilling) CancelledPreBilling
+,     sum(CommercialCancelledPosBilling) CommercialCancelledPosBilling
+,     sum(NoShow) NoShow
+,     sum(Adjustment) Adjustment
+,     cast(0 as decimal(15,2)) NetRevenueLastDay
+,     cast(0 as decimal(15,2)) NetRevenueCity
+,     cast(0 as decimal(15,2)) NetRevenueCityLastDay
+,     cast(0 as decimal(15,2)) GoalCity
+
+from reports.DailyCommercialRevenue
+where EventDate between (select case when datepart(day,getdate()) = 1 then dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date)) else cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date) end ) and (select case when datepart(day,getdate()) = 1 then dateadd(day,-1,dateadd(month,1,dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date))))	else cast(dateadd(day, -1,getdate()) as date) end )
+group by
+      EventMonth
+,     EventYear
+,     Region
+
+union all
+
+select
+      EventMonth
+,     EventYear
+,     'Gerente' "Group"
+,     'N/A' Manager
+,     'N/A' Region
+,     'N/A' Coordinator
+,     'N/A' Team
+,     Manager Variable
+,     sum(GrossSales) GrossSales
+,     sum(GrossSalesPUCommission) GrossSalesPUCommission
+,     sum(CancelledPreBillingPU) CancelledPreBillingPU
+,     sum(CancelledPreBilling) CancelledPreBilling
+,     sum(CommercialCancelledPosBilling) CommercialCancelledPosBilling
+,     sum(NoShow) NoShow
+,     sum(Adjustment) Adjustment
+,     cast(0 as decimal(15,2)) NetRevenueLastDay
+,     cast(0 as decimal(15,2)) NetRevenueCity
+,     cast(0 as decimal(15,2)) NetRevenueCityLastDay
+,     cast(0 as decimal(15,2)) GoalCity
+
+from #DailyCommercialRevenue
+where EventDate between (select case when datepart(day,getdate()) = 1 then dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date)) else cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date) end ) and (select case when datepart(day,getdate()) = 1 then dateadd(day,-1,dateadd(month,1,dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date))))	else cast(dateadd(day, -1,getdate()) as date) end )
+
+group by
+      EventMonth
+,     EventYear
+,     Manager
+
+union all
+
+select
+     EventMonth
+,    EventYear
+,    'Coordenador' "Group"
+,    Manager
+,    'N/A' Region
+,    Coordinator
+,     case
+			when Coordinator = 'Crezos Rodrigues' then 'Salvador, Fortaleza e Recife'
+            when Coordinator = 'Felipe Crull' then 'ABC'
+            when Coordinator = 'Bruno Salado' then 'S?o Paulo Capital'
+            when Coordinator = 'Juliano Ribeiro' then 'Bras?lia, Goi?nia, An?polis e Belo Horizonte'
+            when Coordinator = 'Tatiana Drummond' then 'Rio de Janeiro e Niter?i'
+            when Coordinator = 'Ana Paula Casseb' then 'S?o Jos? do Rio Preto e Ribeir?o Preto'
+            when Coordinator = 'Guilherme Aono' then 'Campinas, Jundia?, Piracicaba'
+            when Coordinator = 'Fabiano Motta' then 'Key Accounts (Turismo)'
+            when Coordinator = 'Fernando Schumacher' then 'Key Accounts (E-commerce)'
+            when Coordinator = 'Christian Abel Siqueira' then 'Porto Alegre, Caxias do Sul, Gramado, Canela, Curitiba e Florian?polis'
+			when Coordinator = 'Catia Predes' then 'Televendas (Local)'
+			else 'Em migra??o'
+      end Team
+,     Coordinator Variable
+,     sum(GrossSales) GrossSales
+,     sum(GrossSalesPUCommission) GrossSalesPUCommission
+,     sum(CancelledPreBillingPU) CancelledPreBillingPU
+,     sum(CancelledPreBilling) CancelledPreBilling
+,     sum(CommercialCancelledPosBilling) CommercialCancelledPosBilling
+,     sum(NoShow) NoShow
+,     sum(Adjustment) Adjustment
+,     cast(0 as decimal(15,2)) NetRevenueLastDay
+,     cast(0 as decimal(15,2)) NetRevenueCity
+,     cast(0 as decimal(15,2)) NetRevenueCityLastDay
+,     cast(0 as decimal(15,2)) GoalCity
+
+from reports.DailyCommercialRevenue
+where EventDate between (select case when datepart(day,getdate()) = 1 then dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date)) else cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date) end ) and (select case when datepart(day,getdate()) = 1 then dateadd(day,-1,dateadd(month,1,dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date))))	else cast(dateadd(day, -1,getdate()) as date) end )
+
+group by
+      EventMonth
+,     EventYear
+,     Manager
+,	  Coordinator
+,     case
+			when Coordinator = 'Crezos Rodrigues' then 'Salvador, Fortaleza e Recife'
+            when Coordinator = 'Felipe Crull' then 'ABC'
+            when Coordinator = 'Bruno Salado' then 'S?o Paulo Capital'
+            when Coordinator = 'Juliano Ribeiro' then 'Bras?lia, Goi?nia, An?polis e Belo Horizonte'
+            when Coordinator = 'Tatiana Drummond' then 'Rio de Janeiro e Niter?i'
+            when Coordinator = 'Ana Paula Casseb' then 'S?o Jos? do Rio Preto e Ribeir?o Preto'
+            when Coordinator = 'Guilherme Aono' then 'Campinas, Jundia?, Piracicaba'
+            when Coordinator = 'Fabiano Motta' then 'Key Accounts (Turismo)'
+            when Coordinator = 'Fernando Schumacher' then 'Key Accounts (E-commerce)'
+            when Coordinator = 'Christian Abel Siqueira' then 'Porto Alegre, Caxias do Sul, Gramado, Canela, Curitiba e Florian?polis'
+			when Coordinator = 'Catia Predes' then 'Televendas (Local)'
+			else 'Em migra??o'
+	  end
+,     Coordinator
+
+union all
+
+select
+      a.EventMonth
+,     a.EventYear
+,     a."Group"
+,     a.Manager
+,     a.Region
+,     a.Coordinator
+,     a.Team
+,     a.Variable
+,     a.GrossSales
+,     a.GrossSalesPUCommission
+,     a.CancelledPreBillingPU
+,     a.CancelledPreBilling
+,     a.CommercialCancelledPosBilling
+,     a.NoShow
+,     a.Adjustment
+,     a.NetRevenueLastDay
+,     b.NetRevenueCity
+,     b.NetRevenueCityLastDay
+,     g.Goal GoalCity
+
+from
+(
+      select
+            EventMonth
+      ,     EventYear
+      ,     'Executivo de Vendas' "Group"
+      ,     Manager
+      ,     Region
+      ,     Coordinator
+      ,     Team
+      ,     OwnerERP Variable
+      ,     sum(GrossSales) GrossSales
+      ,     sum(GrossSalesPUCommission) GrossSalesPUCommission
+      ,     sum(CancelledPreBillingPU) CancelledPreBillingPU
+      ,     sum(CancelledPreBilling) CancelledPreBilling
+      ,     sum(CommercialCancelledPosBilling) CommercialCancelledPosBilling
+      ,     sum(NoShow) NoShow
+      ,     sum(Adjustment) Adjustment
+      ,     sum(case when EventDate = (select case when datepart(day,getdate()) = 1 then dateadd(day,-1,dateadd(month,1,dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date))))	else cast(dateadd(day, -1,getdate()) as date) end ) then GrossSalesPUCommission-CancelledPreBillingPU-CommercialCancelledPosBilling+NoShow+Adjustment else 0 end) NetRevenueLastDay
+
+      from reports.DailyCommercialRevenue dcr
+
+      where EventDate between (select case when datepart(day,getdate()) = 1 then dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date)) else cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date) end ) and (select case when datepart(day,getdate()) = 1 then dateadd(day,-1,dateadd(month,1,dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date))))	else cast(dateadd(day, -1,getdate()) as date) end )
+
+      group by
+            EventMonth
+      ,     EventYear
+      ,     Manager
+      ,     Region
+      ,     Coordinator
+      ,     Team
+      ,     OwnerERP
+      ) a
+
+left join
+(
+      select
+            EventMonth
+      ,     EventYear
+      ,     Team
+      ,     cast(sum(GrossSalesPUCommission-CancelledPreBillingPU-CommercialCancelledPosBilling+NoShow+Adjustment) as decimal(15,2)) NetRevenueCity
+      ,     cast(sum(case when EventDate = (select case when datepart(day,getdate()) = 1 then dateadd(day,-1,dateadd(month,1,dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date))))	else cast(dateadd(day, -1,getdate()) as date) end ) then GrossSalesPUCommission-CancelledPreBillingPU-CommercialCancelledPosBilling+NoShow+Adjustment else 0 end) as decimal(15,2)) NetRevenueCityLastDay
+
+      from reports.DailyCommercialRevenue
+      where EventDate between (select case when datepart(day,getdate()) = 1 then dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date)) else cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date) end ) and (select case when datepart(day,getdate()) = 1 then dateadd(day,-1,dateadd(month,1,dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date))))	else cast(dateadd(day, -1,getdate()) as date) end )
+      group by
+            EventMonth
+      ,     EventYear
+      ,     Team
+      ) b
+      on b.EventMonth = a.EventMonth
+      and b.EventYear = a.EventYear
+      and b.Team = a.Team
+
+left join reports.Goal g
+on g.Variable = a.Team
+and g."Month" = a.EventMonth
+and g."Year" = a.EventYear
+and g."Group" = 'Cidade'
+      ) r
+on g."Month" = r.EventMonth
+and g."Year" = r.EventYear
+and g.Variable = r.Variable
+and g."Group" = r."Group"
+
+left join
+(
+	select
+		OwnerERP Variable
+	,	'Executivo de Vendas' "Group"
+	,	sum(
+			case
+				when datediff(day,(select case when datepart(day,getdate()) = 1 then dateadd(day,-1,dateadd(month,1,dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date))))	else cast(dateadd(day, -1,getdate()) as date) end ),EventDate) between 1 and 7 then ForecastGrossSalesPUCommission
+				else 0
+			end
+			) ForecastGrossSalesPUCommission7
+	,	sum(
+			case
+				when datediff(day,(select case when datepart(day,getdate()) = 1 then dateadd(day,-1,dateadd(month,1,dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date))))	else cast(dateadd(day, -1,getdate()) as date) end ),EventDate) between 8 and 15 then ForecastGrossSalesPUCommission
+				else 0
+			end
+			) ForecastGrossSalesPUCommission15
+	,	sum(
+			case
+				when datediff(day,(select case when datepart(day,getdate()) = 1 then dateadd(day,-1,dateadd(month,1,dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date))))	else cast(dateadd(day, -1,getdate()) as date) end ),EventDate) between 16 and 22 then ForecastGrossSalesPUCommission
+				else 0
+			end
+			) ForecastGrossSalesPUCommission22
+	,	sum(
+			case
+				when datediff(day,(select case when datepart(day,getdate()) = 1 then dateadd(day,-1,dateadd(month,1,dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date))))	else cast(dateadd(day, -1,getdate()) as date) end ),EventDate) between 23 and 30 then ForecastGrossSalesPUCommission
+				else 0
+			end
+			) ForecastGrossSalesPUCommission30
+
+	from reports.ForecastDeals f
+
+	group by
+		OwnerERP
+
+	union all
+
+	select
+		Team Variable
+	,	'Cidade' "Group"
+	,	sum(
+			case
+				when datediff(day,(select case when datepart(day,getdate()) = 1 then dateadd(day,-1,dateadd(month,1,dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date))))	else cast(dateadd(day, -1,getdate()) as date) end ),EventDate) between 1 and 7 then ForecastGrossSalesPUCommission
+				else 0
+			end
+			) ForecastGrossSalesPUCommission7
+	,	sum(
+			case
+				when datediff(day,(select case when datepart(day,getdate()) = 1 then dateadd(day,-1,dateadd(month,1,dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date))))	else cast(dateadd(day, -1,getdate()) as date) end ),EventDate) between 8 and 15 then ForecastGrossSalesPUCommission
+				else 0
+			end
+			) ForecastGrossSalesPUCommission15
+	,	sum(
+			case
+				when datediff(day,(select case when datepart(day,getdate()) = 1 then dateadd(day,-1,dateadd(month,1,dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date))))	else cast(dateadd(day, -1,getdate()) as date) end ),EventDate) between 16 and 22 then ForecastGrossSalesPUCommission
+				else 0
+			end
+			) ForecastGrossSalesPUCommission22
+	,	sum(
+			case
+				when datediff(day,(select case when datepart(day,getdate()) = 1 then dateadd(day,-1,dateadd(month,1,dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date))))	else cast(dateadd(day, -1,getdate()) as date) end ),EventDate) between 23 and 30 then ForecastGrossSalesPUCommission
+				else 0
+			end
+			) ForecastGrossSalesPUCommission30
+
+	from reports.ForecastDeals f
+
+	group by
+		Team
+
+	union all
+
+	select
+		Coordinator Variable
+	,	'Coordenador' "Group"
+	,	sum(
+			case
+				when datediff(day,(select case when datepart(day,getdate()) = 1 then dateadd(day,-1,dateadd(month,1,dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date))))	else cast(dateadd(day, -1,getdate()) as date) end ),EventDate) between 1 and 7 then ForecastGrossSalesPUCommission
+				else 0
+			end
+			) ForecastGrossSalesPUCommission7
+	,	sum(
+			case
+				when datediff(day,(select case when datepart(day,getdate()) = 1 then dateadd(day,-1,dateadd(month,1,dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date))))	else cast(dateadd(day, -1,getdate()) as date) end ),EventDate) between 8 and 15 then ForecastGrossSalesPUCommission
+				else 0
+			end
+			) ForecastGrossSalesPUCommission15
+	,	sum(
+			case
+				when datediff(day,(select case when datepart(day,getdate()) = 1 then dateadd(day,-1,dateadd(month,1,dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date))))	else cast(dateadd(day, -1,getdate()) as date) end ),EventDate) between 16 and 22 then ForecastGrossSalesPUCommission
+				else 0
+			end
+			) ForecastGrossSalesPUCommission22
+	,	sum(
+			case
+				when datediff(day,(select case when datepart(day,getdate()) = 1 then dateadd(day,-1,dateadd(month,1,dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date))))	else cast(dateadd(day, -1,getdate()) as date) end ),EventDate) between 23 and 30 then ForecastGrossSalesPUCommission
+				else 0
+			end
+			) ForecastGrossSalesPUCommission30
+
+	from reports.ForecastDeals f
+
+	group by
+		Coordinator
+
+	union all
+
+	select
+		Manager Variable
+	,	'Gerente' "Group"
+	,	sum(
+			case
+				when datediff(day,(select case when datepart(day,getdate()) = 1 then dateadd(day,-1,dateadd(month,1,dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date))))	else cast(dateadd(day, -1,getdate()) as date) end ),EventDate) between 1 and 7 then ForecastGrossSalesPUCommission
+				else 0
+			end
+			) ForecastGrossSalesPUCommission7
+	,	sum(
+			case
+				when datediff(day,(select case when datepart(day,getdate()) = 1 then dateadd(day,-1,dateadd(month,1,dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date))))	else cast(dateadd(day, -1,getdate()) as date) end ),EventDate) between 8 and 15 then ForecastGrossSalesPUCommission
+				else 0
+			end
+			) ForecastGrossSalesPUCommission15
+	,	sum(
+			case
+				when datediff(day,(select case when datepart(day,getdate()) = 1 then dateadd(day,-1,dateadd(month,1,dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date))))	else cast(dateadd(day, -1,getdate()) as date) end ),EventDate) between 16 and 22 then ForecastGrossSalesPUCommission
+				else 0
+			end
+			) ForecastGrossSalesPUCommission22
+	,	sum(
+			case
+				when datediff(day,(select case when datepart(day,getdate()) = 1 then dateadd(day,-1,dateadd(month,1,dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date))))	else cast(dateadd(day, -1,getdate()) as date) end ),EventDate) between 23 and 30 then ForecastGrossSalesPUCommission
+				else 0
+			end
+			) ForecastGrossSalesPUCommission30
+
+	from reports.ForecastDeals f
+
+	group by
+		Manager
+		
+	union all
+
+	select
+		Region Variable
+	,	'Regi?o' "Group"
+	,	sum(
+			case
+				when datediff(day,(select case when datepart(day,getdate()) = 1 then dateadd(day,-1,dateadd(month,1,dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date))))	else cast(dateadd(day, -1,getdate()) as date) end ),EventDate) between 1 and 7 then ForecastGrossSalesPUCommission
+				else 0
+			end
+			) ForecastGrossSalesPUCommission7
+	,	sum(
+			case
+				when datediff(day,(select case when datepart(day,getdate()) = 1 then dateadd(day,-1,dateadd(month,1,dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date))))	else cast(dateadd(day, -1,getdate()) as date) end ),EventDate) between 8 and 15 then ForecastGrossSalesPUCommission
+				else 0
+			end
+			) ForecastGrossSalesPUCommission15
+	,	sum(
+			case
+				when datediff(day,(select case when datepart(day,getdate()) = 1 then dateadd(day,-1,dateadd(month,1,dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date))))	else cast(dateadd(day, -1,getdate()) as date) end ),EventDate) between 16 and 22 then ForecastGrossSalesPUCommission
+				else 0
+			end
+			) ForecastGrossSalesPUCommission22
+	,	sum(
+			case
+				when datediff(day,(select case when datepart(day,getdate()) = 1 then dateadd(day,-1,dateadd(month,1,dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date))))	else cast(dateadd(day, -1,getdate()) as date) end ),EventDate) between 23 and 30 then ForecastGrossSalesPUCommission
+				else 0
+			end
+			) ForecastGrossSalesPUCommission30
+
+	from reports.ForecastDeals f
+
+	group by
+		Region
+	union all
+
+	select
+		'Total Geral' Variable
+	,	'Cidade' "Group"
+	,	sum(
+			case
+				when datediff(day,(select case when datepart(day,getdate()) = 1 then dateadd(day,-1,dateadd(month,1,dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date))))	else cast(dateadd(day, -1,getdate()) as date) end ),EventDate) between 1 and 7 then ForecastGrossSalesPUCommission
+				else 0
+			end
+			) ForecastGrossSalesPUCommission7
+	,	sum(
+			case
+				when datediff(day,(select case when datepart(day,getdate()) = 1 then dateadd(day,-1,dateadd(month,1,dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date))))	else cast(dateadd(day, -1,getdate()) as date) end ),EventDate) between 8 and 15 then ForecastGrossSalesPUCommission
+				else 0
+			end
+			) ForecastGrossSalesPUCommission15
+	,	sum(
+			case
+				when datediff(day,(select case when datepart(day,getdate()) = 1 then dateadd(day,-1,dateadd(month,1,dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date))))	else cast(dateadd(day, -1,getdate()) as date) end ),EventDate) between 16 and 22 then ForecastGrossSalesPUCommission
+				else 0
+			end
+			) ForecastGrossSalesPUCommission22
+	,	sum(
+			case
+				when datediff(day,(select case when datepart(day,getdate()) = 1 then dateadd(day,-1,dateadd(month,1,dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date))))	else cast(dateadd(day, -1,getdate()) as date) end ),EventDate) between 23 and 30 then ForecastGrossSalesPUCommission
+				else 0
+			end
+			) ForecastGrossSalesPUCommission30
+
+	from reports.ForecastDeals f
+	
+	) x
+on g.Variable = x.Variable
+and g."Group" = x."Group"
+
+where g."Month" = date_part(month,(select case when datepart(day,getdate()) = 1 then dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date)) else cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date) end ))
+and g."Year" = date_part(year,(select case when datepart(day,getdate()) = 1 then dateadd(day,-1,dateadd(month,1,dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date))))	else cast(dateadd(day, -1,getdate()) as date) end ))
+
+;
+delete from reports.CommercialAchievement
+where "Month" = date_part(month,(select case when datepart(day,getdate()) = 1 then dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date)) else cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date) end ))
+and "Year" = date_part(year,(select case when datepart(day,getdate()) = 1 then dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date)) else cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date) end ))
+;
+insert into reports.CommercialAchievement
+select  * from #CommercialAchievement
+;
+commit

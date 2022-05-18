@@ -1,0 +1,254 @@
+drop table if exists #purchaseOrderTeresa
+;
+select 
+	ubh_id PurchaseId
+,	s.useraccountid
+,	cast(ubh_price_amount_gross as decimal(18,2)) grosssales
+,	cast(ubh_created as date) EventDate
+,	left(cast(ubh_created as date)::text, 7) 
+,	min(cast(ubh_created as date)) over(partition by s.useraccountid) ActivationDate
+,	rank() over(partition by s.useraccountid order by s.ubh_created asc,s.ubh_id asc) PurchaseOrder
+
+into #purchaseOrderTeresa
+from teresa.users_billing_history s
+where ubh_transaction_state_id in (5,6,7,9,10,12,13,15,16,17,18)
+;
+
+drop table if exists #UserAccountLifeCycle
+;
+create table #UserAccountLifeCycle
+(
+	UserAccountId int 
+,	PurchaseOrder int 
+,	PurchaseId int 
+,	LifeCycleNumber int
+,	LTVCycleType int 
+,	ActivationDate date
+,	CyclePurchaseOrder int
+)
+distkey (UserAccountId)
+;
+
+
+insert into #UserAccountLifeCycle
+select 
+	b.useraccountid
+,	b.purchaseorder
+,	b.PurchaseId
+,	rank() over (partition by b.useraccountid,c.months order by b.purchaseorder) LifeCycleNumber
+,	c.months
+,	b.EventDate ActivationDate
+,	1
+from #purchaseOrderTeresa b 
+inner join reports.LTVCycleType c 
+on b.useraccountid = b.useraccountid
+left join #purchaseOrderTeresa a 
+on b.UserAccountId = a.UserAccountId 
+and b.purchaseOrder = a.purchaseOrder + 1
+where datediff(day,a.EventDate, b.EventDate) > c.days or a.EventDate is null
+;
+
+insert into #UserAccountLifeCycle
+select 
+	c.useraccountid
+,	c.purchaseorder
+,	c.PurchaseId
+,	a.LifeCycleNumber
+,	a.ltvcycletype
+,	a.ActivationDate
+,	(c.purchaseorder - a.purchaseorder) + 1
+from #UserAccountLifeCycle a
+inner join #purchaseOrderTeresa c
+on c.UserAccountId = a.UserAccountId 
+and c.purchaseOrder > a.purchaseOrder
+left join #UserAccountLifeCycle b
+on b.UserAccountId = a.UserAccountId 
+and b.LifeCycleNumber = a.LifeCycleNumber + 1
+and b.ltvcycletype = a.ltvcycletype
+where (c.purchaseOrder < b.purchaseOrder or b.purchaseOrder is null)
+;
+truncate table reports.UserAccountLifeCycleTeresa
+;
+
+insert into reports.UserAccountLifeCycleTeresa
+select * from #UserAccountLifeCycle
+;
+
+drop table if exists #ltvDates
+;
+
+	select 
+		a.months CycleType
+	,	a.days
+	,	cast(dateadd(day, ((days + 1) * -1),cast(getdate() as date)) as date) limitDate 	
+	,	c.date activationDate 
+	,	d.date startSaleDate
+	,	cast(dateadd(day,29,d.date) as date) endSaleDate
+	,	(datediff(day,c.date,d.date) / 30) + 1 months
+	into #ltvDates
+	from  reports.LTVCycleType a
+	inner join reports.currentcalendar c
+	on c."date" > cast(dateadd(day, ((days + 1 + 30) * -1),cast(getdate() as date)) as date)
+	and c.date < cast(getdate() as date)
+	inner join reports.currentcalendar d
+	on d."date" between c.date and cast(dateadd(day, a.days ,c.date) as date)
+	where datediff(day,c.date,d.date) % 30 = 0
+	and cast(dateadd(day,30,d.date) as date) < cast(getdate() as date)
+	order by 1,2,3,4,5
+;
+drop table if exists #qtyUsers
+;
+	
+SELECT
+	cycletype
+,	maxmonth
+,	sum(qty) over(partition by cycletype order by cycletype, maxmonth desc rows unbounded preceding) qty
+into #qtyUsers
+from 
+(
+select 
+	cycletype
+,	maxmonth	
+,	sum(qty) qty
+from 
+(
+	select 
+		cycletype
+	,	d.ActivationDate	
+	,	qty
+	,	maxMonth 
+	from 
+	(select  cycletype,activationDate, max(months) maxMonth from #ltvDates group by 1,2) d 
+	inner join (select distinct activationDate, count(distinct UserAccountId) qty from #purchaseOrderTeresa group by 1) p 
+	on p.activationDate = d.activationDate
+) x	
+group BY 1,2
+) a
+
+;
+drop table if exists #agspu
+;
+
+
+select 
+	s.cycletype
+,	s.months
+,	s.grosssales
+,	u.qty
+,	s.grosssales/u.qty AGSPU
+into #agspu
+from 
+(
+select 
+	l.cycletype
+,	l.months
+,	sum(grossSales) grosssales
+from #ltvDates l
+inner join #purchaseOrderTeresa p 
+on p.ActivationDate = l.activationDate
+and p.eventdate between l.startSaleDate and l.endSaleDate
+group by 1,2
+) s 
+inner join #qtyUsers u 
+on u.maxmonth = s.months
+and s.cycletype = u.cycletype
+order by 2,1
+;
+drop table if exists #curve
+;
+
+select 
+	a.cycleType
+,	a.months
+,	a.agspu/ t.agspuTotal monthPerc
+,	sum(a.agspu/ t.agspuTotal ) over(partition by a.cycleType order by a.months  rows unbounded preceding) accumPerc
+into #curve
+from #agspu a 
+inner join
+	(
+	select 
+		cycletype
+	,	sum(AGSPU) agspuTotal
+	from #agspu
+	group by 1
+	) t 
+on
+a.cycletype = t.cycletype
+order by 1,2
+;
+update #curve
+set monthPerc = monthPerc + ( 1 - accumPerc)
+,	accumPerc = 1
+where months = cycleType
+
+;
+
+
+
+
+
+drop table if exists #UserAccountLTVTeresa
+;
+CREATE TABLE #UserAccountLTVTeresa
+(
+	"useraccountid" INTEGER   ENCODE lzo
+	,"activationdate" DATE   ENCODE lzo
+	,"lifecyclenumber" INTEGER   ENCODE lzo
+	,"ltvcycletype" INTEGER   ENCODE lzo
+	,"monthscompleted" BIGINT   ENCODE lzo
+	,"activationpurchaseid" INTEGER   ENCODE lzo
+	,"lastpurchasedate" DATE   ENCODE lzo
+	,"lastpurchaseid" INTEGER   ENCODE lzo
+	,"grosssalestotal" NUMERIC(38,2)   ENCODE lzo
+	,"grosssalesfirstpurchase" NUMERIC(38,2)   ENCODE lzo
+	,"grosssalesreal" NUMERIC(38,2)   ENCODE lzo
+	,"grosssalesest" NUMERIC(38,4)   ENCODE lzo
+	,"estimativefactor" NUMERIC(38,4)   ENCODE lzo
+	,"durationoflifeinmonths" BIGINT   ENCODE lzo
+	,"monthsinltvcalc" BIGINT   ENCODE lzo
+	,"iscyclealive" INTEGER   ENCODE lzo
+)
+distkey (useraccountid)
+sortkey (useraccountid)
+;
+	insert into  #UserAccountLTVTeresa
+	select 
+		x.*
+	,	GrossSalesReal / coalesce(accumPerc,1) GrossSalesEst
+	,	coalesce(accumPerc,1) EstimativeFactor
+	,	datediff(month,ActivationDate,LastPurchaseDate) DurationOfLifeInMonths
+	,	case when x.monthsCompleted > x.LTVCycleType then x.LTVCycleType else x.monthsCompleted end monthsInLtvCalc
+	,	case when datediff(month,LastPurchaseDate,dateadd(day,-1,cast(getdate() as date))) >= x.LTVCycleType then 0 else 1 end isCycleAlive
+	
+	from 
+		(
+		select
+			p.UserAccountID
+		,	l.ActivationDate
+		,	l.LifeCycleNumber
+		,	l.LTVCycleType
+		,	datediff(month,l.ActivationDate,dateadd(day,-1,cast(getdate() as date))) +  1 monthsCompleted
+		,	min(l.purchaseid) ActivationPurchaseId
+		,	max(EventDate) LastPurchaseDate
+		,	max(l.purchaseid) LastPurchaseId
+		,	sum(GrossSales) GrossSalesTotal
+		,	sum(case when cyclePurchaseOrder = 1 then GrossSales else 0 end ) GrossSalesFirstPurchase
+		,	sum(case when datediff(month,l.ActivationDate,EventDate) < l.LTVCycleType then GrossSales else 0 end ) GrossSalesReal
+		from #purchaseOrderTeresa p
+		inner join  #UserAccountLifeCycle l 
+		on p.userAccountId = l.userAccountId
+		and p.purchaseId = l.purchaseId
+		group by 1,2,3,4
+		) x
+		left join #curve c 
+		on x.LTVCycleType = c.cycleType
+		and  x.monthsCompleted = c.months
+		
+		
+;
+
+truncate table  reports.UserAccountLTVTeresa
+;
+insert into  reports.UserAccountLTVTeresa
+select * from #UserAccountLTVTeresa
+;

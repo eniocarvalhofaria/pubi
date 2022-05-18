@@ -1,0 +1,290 @@
+drop table if exists #WeeklyReport;
+select
+	x.yearReference
+,	x.weekReference
+,	x.WeekRange
+,	x.GrossSales
+,	x.GrossSalesMobile
+,	x.GrossRevenue
+,	x.QtyTransactions
+,	x.QtyCoupons
+,	x.QtyCinemaCoupons
+,	quarterResult.GrossSales GrossSalesQuarterAccum
+,	quarterResult.GrossRevenue GrossRevenueQuarterAccum
+,	ua.QTYActivations
+,	ua.QTYReactivations365
+,	ua.QtyCustomers365
+,	dEntries.QtyOffers
+,	dEntries.QtySellingOffers
+,	dEntries.QtyMerchants
+,	dEntries.QtySellingMerchants
+,	dEntries.QtyOffersLocal
+,	dEntries.QtySellingOffersLocal
+,	dEntries.QtyMerchantsLocal
+,	dEntries.QtySellingMerchantsLocal
+,	vis.AvgVisits
+,	vis.AvgAnalyticsUsers
+,	cus.AvgPurchasersMobile
+,	cus.AvgPurchasersPC
+,	cus.AvgPurchasersTotal
+,	dd.AvgDailyLiveOffer
+,	dd.AvgDailyNewOffer
+,	dd.AvgDailyNewMerchant
+,	dd.DailyLiveMerchant
+,	ss.OrganicGrossRevenue
+,	x.GMV
+,	quarterResult.GMV GMVQuarterAccum
+into #WeeklyReport
+from
+(
+select
+	yearReference
+,	weekReference
+,	substring(cast((datepart(month,FirstDay) + 100) as char(3)),2,2) + '.' + substring(cast((datepart(day,FirstDay) + 100) as char(3)),2,2) + '-' +
+	substring(cast((datepart(month,LastDay) + 100) as char(3)),2,2) + '.' + substring(cast((datepart(day,LastDay) + 100) as char(3)),2,2) WeekRange
+,	sum(grossSales) GrossSales
+,	sum(grossSales + financeCharge + extrafees) GMV
+,	sum(case when SourceId in ( 2,3)  then grossSales else 0 end) GrossSalesMobile
+,	sum(grossSalesPuCommission) GrossRevenue
+,	sum(QtyTransactions) QtyTransactions
+,	sum(QtyCoupons) QtyCoupons
+,	sum(case when udCinema.UnifiedDiscountId is not null then QtyCoupons else 0 end) QtyCinemaCoupons
+
+from  reports.WeeklyReportDates c inner join
+reports.DiscountRevenue dr
+on dr.EventDate between c.FirstDay and c.LastDay
+left join
+	(
+		select
+			UnifiedDiscountId
+		from ods.UnifiedDiscount
+		where ContractId in
+		(
+			select  distinct
+					ContractId 
+			from reports.Contract c
+			left join reports.Offer o
+			on c.SalesForceContractId = o.SalesForceContractId
+			where
+			c.Subcategory_Site = 'Cinema'
+			or c.Subcategory = 'Cinema'
+			or o.Subcategory = 'Cinema'
+		)
+	) udCinema
+on dr.UnifiedDiscountId = udCinema.UnifiedDiscountId
+group by
+	1,2,3
+) x
+inner join
+(
+select
+	yearReference
+,	weekReference
+,	sum(GrossSales)GrossSales
+,	sum(grossSalesPuCommission) GrossRevenue
+,	sum(GMV) GMV
+from
+ reports.WeeklyReportDates c	
+inner join
+(
+	select
+		EventDate
+	,	datepart(year,EventDate) EventYear
+	,	(datepart(month,EventDate) + 2) / 3 Quarter
+	,	sum(GrossSales) GrossSales
+	,	sum(grossSalesPuCommission) grossSalesPuCommission
+	,	sum(grossSales + financeCharge + extrafees) GMV
+	from
+	reports.DiscountRevenue 
+	group by 
+		EventDate
+	,	(datepart(month,EventDate) + 2) / 3	
+	,	datepart(year,EventDate)
+) drqt
+on c.Quarter = drqt.Quarter
+and c.LastDay >= drqt.EventDate
+and c.yearReference = EventYear
+group by
+	1,2
+
+) quarterResult
+on x.yearReference = quarterResult.yearReference
+and x.weekReference = quarterResult.weekReference
+
+left join 
+(
+	select
+		c.yearReference
+	,	c.WeekReference
+	,	sum(QTYActivations) QTYActivations
+	,	sum(QTYReactivations365) QTYReactivations365
+	,	avg(QtyCustomers365) QtyCustomers365
+	from	
+	 reports.WeeklyReportDates c	
+	inner join
+		(
+			select
+				statusDate
+			,	sum(coalesce(QTYActivations,0)) QTYActivations
+			,	sum(coalesce(QTYReactivations365,0)) QTYReactivations365
+			,	sum(coalesce(QtyCustomers365,0)) QtyCustomers365
+			from reports.UserActivity
+			group by statusDate
+		) ua1
+	on ua1.StatusDate between c.FirstDay and c.LastDay
+	group by
+		1,2
+	
+	) ua
+on x.yearReference = ua.yearReference
+and x.weekReference = ua.weekReference
+inner join
+
+(
+	select 
+		yearReference
+	,	weekReference
+	,	count(distinct udp.UnifiedDiscountId) QtyOffers
+	,	count(distinct case when GrossSales > 0 then udp.UnifiedDiscountId else null end) QtySellingOffers
+	,	count(distinct accountid) QtyMerchants
+	,	count(distinct case when GrossSales > 0 then accountid else null end) QtySellingMerchants
+	,	count(distinct case when udc.CategoryId not in (1,10) then udp.UnifiedDiscountId else null end ) QtyOffersLocal
+	,	count(distinct case when GrossSales > 0 and udc.CategoryId not in (1,10) then udp.UnifiedDiscountId else null end) QtySellingOffersLocal
+	,	count(distinct case when udc.CategoryId not in (1,10) then accountid else null end ) QtyMerchantsLocal
+	,	count(distinct case when GrossSales > 0 and udc.CategoryId not in (1,10) then accountid else null end) QtySellingMerchantsLocal
+	from reports.unifieddiscountscheduling udp
+	left join
+	(
+		select 
+			UnifiedDiscountId
+		,	EventDate
+		,	sum(GrossSales) GrossSales
+		from reports.DiscountRevenue
+		group by
+			UnifiedDiscountId
+		,	EventDate
+	) dr
+	on udp.DateForSale = dr.EventDate
+	and udp.UnifiedDiscountId = dr.UnifiedDiscountId
+   	inner join reports.UnifiedDiscountCategory udc
+	on udp.UnifiedDiscountId = udc.UnifiedDiscountId
+	inner join reports.WeeklyReportDates c
+	on udp.DateForSale between c.FirstDay and c.LastDay
+	group by
+		1,2
+) dEntries
+on x.yearReference = dEntries.yearReference
+and x.weekReference = dEntries.weekReference
+left join
+(
+	select
+		yearReference
+	,	weekReference
+	,	avg(Visits) AvgVisits
+	,	avg(Users) AvgAnalyticsUsers
+	from
+	(
+		select EventDate
+		,	sum(Visits) Visits
+		,	sum(Users) Users
+		from reports.VisitsAnalytics
+		group by EventDate
+	) v
+	inner join reports.WeeklyReportDates c
+	on v.EventDate between c.FirstDay and c.LastDay
+	group by 
+		1,2
+) vis
+on x.yearReference = vis.yearReference
+and x.weekReference = vis.weekReference
+left join
+(
+	select
+		yearReference
+	,	weekReference
+	,	avg(PurchasersMobile) AvgPurchasersMobile
+	,	avg(PurchasersPC) AvgPurchasersPC
+	,	avg(PurchasersTotal) AvgPurchasersTotal
+	from
+	(
+		select 
+			EventDate
+		,	count(distinct case when SourceId in (2,3) then UserAccountId else null end) PurchasersMobile
+		,	count(distinct case when SourceId = 1 then UserAccountId else null end) PurchasersPC
+		,	count(distinct UserAccountId ) PurchasersTotal
+		from ods.Sales
+		where Type = 1
+		group by 
+			EventDate
+	) v
+	inner join reports.WeeklyReportDates c
+	on v.EventDate between c.FirstDay and c.LastDay
+	group by 
+		1,2
+) cus
+on x.yearReference = cus.yearReference
+and x.weekReference = cus.weekReference
+
+left join
+(
+	select
+		yearReference
+	,	weekReference
+	,	avg(DailyLiveOffer) AvgDailyLiveOffer
+	,	avg(DailyNewOffer) AvgDailyNewOffer
+	,	avg(DailyNewMerchant) AvgDailyNewMerchant
+	,	avg(DailyLiveMerchant) DailyLiveMerchant
+	from
+	(
+		select 
+			DateForSale
+		,	count(distinct UnifiedDiscountId)DailyLiveOffer
+		,	count(distinct accountid)DailyLiveMerchant
+		,	count(distinct case when IsFirstDate = 1 then accountid else null end) DailyNewMerchant
+		,	count(distinct case when IsFirstDate = 1 then UnifiedDiscountId else null end) DailyNewOffer
+		from 
+		reports.UnifiedDiscountscheduling
+		group by DateForSale
+	) v
+	inner join reports.WeeklyReportDates c
+	on v.DateForSale between c.FirstDay and c.LastDay
+	group by 
+		yearReference
+	,	weekReference
+) dd
+on x.yearReference = dd.yearReference
+and x.weekReference = dd.weekReference
+
+left join
+(
+	select
+		yearReference
+	,	weekReference
+	,	sum(OrganicGrossRevenue) OrganicGrossRevenue
+	from
+	(
+		select 
+			cast(coalesce(authorizationdate,purchaseinitiated) as date) eventDate
+		,	cast(sum(case when not((s.landingpageurl like '%utm_medium=%' and s.landingpageurl not like '%utm_medium=email%') or s.promocodes > 0) then s.grossRevenue else 0 end) as decimal(18,2)) OrganicGrossRevenue
+
+		from 
+		ods.sales s
+		where type = 1
+		group by 1
+	) v
+	inner join reports.WeeklyReportDates c
+	on eventDate between c.FirstDay and c.LastDay
+	group by 
+		yearReference
+	,	weekReference
+) ss
+on x.yearReference = ss.yearReference
+and x.weekReference = ss.weekReference
+
+
+;
+truncate table reports.WeeklyReport
+;
+insert into reports.WeeklyReport
+select * from #WeeklyReport
+; 

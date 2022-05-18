@@ -1,0 +1,591 @@
+﻿-------------------------------------------------------------------------------
+-- DROP TEMP TABLES USED WITHIN THE PROCESS
+-------------------------------------------------------------------------------
+drop table if exists #CargaGrossProfit;
+drop table if exists #DailyCommercialRevenueGrossProfit;
+drop table if exists #CommercialAchievementGrossProfit;
+
+-------------------------------------------------------------------------------
+-- CREATE TEMP TABLE WITH ALL THE METRICS
+-------------------------------------------------------------------------------
+select
+	1 "datasource"
+	, eventdate "eventdate"
+	,	discountid "discountid"
+	,	unifieddiscountid "unifieddiscountid"
+	,	sum(qtycoupons) "qtycoupons"
+	,	sum(grosssales) "grosssales"
+	,	sum(grosssalespucommission) "grosssalespucommission"
+	,	sum(cancelledposbilling) "cancelledposbilling"
+	,	sum(cancelledprebilling) "cancelledprebilling"
+	,	sum(cancelledprebillingpu) "cancelledprebillingpu"
+	,	sum(cancelledposbillingpu) "cancelledposbillingpu"
+	,	sum(noshow) "noshow"
+	,	sum(ammounttopartner) "ammounttopartner"
+	,	sum(promocodesnoactivationrule) "promocodes"
+	,	sum(financecharge) "financecharge"
+	,	sum(antifraudfee) "antifraudfee"
+	,	sum(aquirerfee) "aquirerfee"
+	,	sum(anticipationcost) "anticipationcost"
+	,	sum(taxes) "taxes"
+	,	sum(extrafees) "extrafees"
+	,	sum(extrafeespu) "extrafeespu"
+	,	sum(cancellationfinancecharge) "cancellationfinancecharge"
+	,	sum(0) "cancellationextrafees"
+	,	sum(0) "cancellationextrafeespu"
+into table #CargaGrossProfit
+from reports.DiscountRevenue
+where 1=1
+	and eventdate between (select case when datepart(day,getdate()) = 1 then dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date)) else cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date) end )
+	and  (select case when datepart(day,getdate()) = 1 then dateadd(day,-1,dateadd(month,1,dateadd(month, -1, cast(dateadd(day,(datepart(day,getdate()) -1) * -1,getdate()) as date))))	else cast(dateadd(day, -1,getdate()) as date) end )
+	and sourceid in (1, 2, 3) --filtro apenas para ofertas do site PU
+group by
+	eventdate
+	,	discountid
+	,	unifieddiscountid ;
+
+-------------------------------------------------------------------------------
+-- LOAD DATA INTO THE MAIN TEMP TABLE
+-------------------------------------------------------------------------------
+select * into #DailyCommercialRevenueGrossProfit
+from
+(
+	-------------------------------------------------------------------------------
+	-- LOAD DATA RELATED TO THE MAIN ASSESSMENT
+	-------------------------------------------------------------------------------
+	select
+		dr.EventDate
+		,	date_part(year,dr.EventDate) "EventYear"
+		,	date_part(month,dr.EventDate) "EventMonth"
+		,	date_part(day,dr.EventDate) "EventDay"
+		,	case
+				when (t_acc.team = 'Key Account (E-commerce)' or t_of.team = 'Key Account (E-commerce)') then func_of.Name
+				else
+					case
+						when acc.iscalculatedbycontract = 1 then func_con.name
+						else func_acc.name
+					end
+			end "Owner"
+		,	coalesce(case when (t_acc.team = 'Key Account (E-commerce)' or t_of.team = 'Key Account (E-commerce)') then ownere_of.ownerERP else case when 1=2 then ownere_con.ownerERP else ownere_acc.ownerERP end end,'Em tratamento') "OwnerERP"
+		,	coalesce(case when (t_acc.team = 'Key Account (E-commerce)' or t_of.team = 'Key Account (E-commerce)') then t_of.coordinator else case when 1=2 then t_con.coordinator else t_acc.coordinator end end,'Em tratamento') "Coordinator"
+		,	coalesce(case when (t_acc.team = 'Key Account (E-commerce)' or t_of.team = 'Key Account (E-commerce)') then t_of.manager else case when 1=2 then t_con.manager else t_acc.manager end end,'Em tratamento') "Manager"
+		,	coalesce(case when (t_acc.team = 'Key Account (E-commerce)' or t_of.team = 'Key Account (E-commerce)') then ot_of.region else case when 1=2 then ot_con.region else ot_acc.region end end,'Em tratamento') "Region"
+		,	coalesce(case when (t_acc.team = 'Key Account (E-commerce)' or t_of.team = 'Key Account (E-commerce)') then t_of.team else case when 1=2 then t_con.team else t_acc.team end end,'Em tratamento') "Team"
+		,	udis.ContractID
+		,	dr.UnifiedDiscountID
+		,	ndis.DiscountName
+		,	case when offer.Name is not null then offer.Name else null end "IdOferta"
+		,	case when op.Name is not null then op.Name else null end "PurchaseOption"
+		,	acc.AccountID
+		,	acc.AccountName
+		,	case
+				when con.Category in	('Entretenimento','Entretenimento, Cultura e Vida Noturna','Entretenimento, Cultuta e Vida Noturna','Lazer')
+				then 'Entret. & Lazer'
+				else con.Category
+			end  "CategoryName"
+		,	0 "IsCalculatedBycontract"
+		, 	case when (acc.sharedserviceowner is null or acc.sharedserviceowner = '') then 0 else 1 end "HasSharedService"
+		,	dis.DiscountedValue
+		,	cast(sum(dr.QTYCoupons )as int) "QtyCoupons"
+		,	cast(dis.OurCommission as decimal(15,2)) "OurCommission"
+		,	sum(dr.GrossSales) "GrossSales"
+		,	sum(dr.GrossSales + dr.extrafeespu) "GrossSalesWithExtraFeesPU"
+		,	sum(dr.GrossSalesPUCommission) "GrossSalesPUCommission"
+		,	sum(case when mdis.MinEventDate >= '2012-08-01' then dr.CancelledPosBilling else 0 end) "CommercialCancelledPosBilling"
+		,	sum(dr.CancelledPreBilling) "CancelledPreBilling"
+		,	sum(dr.CancelledPreBillingPU) "CancelledPreBillingPU"
+		,	sum(dr.NoShow) "NoShow"
+		,	sum(dr.CancelledPosBillingPU) "CancelledPosBillingPU"
+		,	sum(dr.ammounttopartner) "ammounttopartner"
+		,	sum(dr.promocodes) "promocodes"
+		,	sum(dr.financecharge) "financecharge"
+		,	sum(dr.antifraudfee) "antifraudfee"
+		,	sum(dr.aquirerfee) "aquirerfee"
+		,	sum(dr.anticipationcost) "anticipationcost"
+		,	sum(dr.taxes) "taxes"
+		,	sum(dr.extrafees) "extrafees"
+		,	sum(dr.extrafeespu) "extrafeespu"
+		,	cast((case when (acc.sharedserviceowner is null or acc.sharedserviceowner = '') then 1 else (100-acc.sharedservicepercent)/100 end) as dec(10,3)) "sharedservicepercent"
+		,	sum(dr.cancellationfinancecharge) "cancellationfinancecharge"
+		,	sum(0) "cancellationextrafees"
+		,	sum(0) "cancellationextrafeespu"
+		,	cast(sum(case when udis.contractid = '165067' then (dr.GrossSales * -0.86) else 0 end) as decimal(15,2)) "Adjustment" -- Camarote Salvador
+		,	coalesce(con.DealsClub,0) "DealsClub"
+		,	con.PaymentCondition
+		,	con.PaymentConditionName
+		,	coalesce(con.Subdivision,'Não tem') "Subdivision"
+		,	con.Type_Site
+		,	case
+				when len(op.categoria_site_oferta) > 1 or op.categoria_site_oferta is not null then op.categoria_site_oferta
+				when len(offer.of_categoria_site) > 1 or offer.of_categoria_site is not null then offer.of_categoria_site
+				else con.Category_Site
+			end "Category_Site"
+		,	case
+				when len(op.subcategoria_site_oferta) > 1 or op.subcategoria_site_oferta is not null then op.subcategoria_site_oferta
+				when len(offer.of_categoria_site) > 1 or offer.of_categoria_site is not null then offer.of_categoria_site
+				else con.SubCategory_Site
+			end	"SubCategory_Site"
+		,	coalesce(con.UseNow,0) "UseNow"
+		,	con.DealCity
+	from #CargaGrossProfit dr
+	left join ods.Discount dis
+		on dis.DiscountID = dr.DiscountID
+	left join ods.UnifiedDiscount udis
+		on dr.UnifiedDiscountID = udis.UnifiedDiscountID
+	left join reports.discountcategory dc
+		on dc.discountcategoryid = dis.discountcategoryid
+	left join salesforce.ctOp_es_de_Compra op
+		on  op.C_digo_Opcao_N_merico = dis.IdOpcaoDeCompra
+	left join salesforce.ctOfertas offer
+		on offer.Id = op.Id_da_Oferta
+	left join salesforce.ctOfertas offer2
+	  on offer2.c_digo_oferta_num_rico = udis.Idoferta
+	left join salesforce.ctcontratopu contratoPU
+		on udis.ContractId = right(contratoPU.Name, 6)
+	left join
+	(
+		select
+			dis.UnifiedDiscountID
+			,	min(DiscountName) DiscountName
+		from ods.Discount dis
+		group by
+			dis.UnifiedDiscountID
+	) ndis
+		on dr.UnifiedDiscountID = ndis.UnifiedDiscountID
+	left join reports.Contract con
+		on con.ContractId = udis.ContractID
+	left join reports.Account acc
+		on acc.AccountID = con.AccountID
+	left join salesforce.cfaccount cfacc
+		on cfacc.id = acc.accountid
+	left join reports.AccountPublication_fech ap
+		on acc.AccountID = ap.AccountID
+	left join reports.UnifiedDiscountCategory udc
+		on udc.UnifiedDiscountID = dr.UnifiedDiscountID
+	left join reports.Category ct
+		on ct.CategoryID = udc.CategoryID
+	left join
+	(
+		select
+			dis.UnifiedDiscountID
+			,	min(dis.RepresentantID) RepresentantID
+		from ods.Discount dis
+		group by
+			dis.UnifiedDiscountID
+	) urp
+		on urp.UnifiedDiscountID = dr.UnifiedDiscountID
+	left join ods.Representant rp
+		on rp.RepresentantID = urp.RepresentantID
+	left join
+	(
+		select
+			dis.UnifiedDiscountID
+			,	min(dr.EventDate) MinEventDate
+		from reports.DiscountRevenue dr  --Temp
+		left join ods.Discount dis
+			on dr.DiscountID = dis.DiscountID
+		where dr.GrossSales > 0
+			and dr.sourceid in (1, 2, 3) --filtro apenas para ofertas do site PU
+		group by
+			dis.UnifiedDiscountID
+	) mdis
+		on mdis.UnifiedDiscountID = dr.UnifiedDiscountID
+--v-- estrutura comercial contabilizada por OP --v--
+	left join salesforce.ctCadastro_de_Funcion_rios func
+		on
+			case
+				when op.ID_Propriet_rio_Final is not null then op.ID_Propriet_rio_Final
+				when offer2.Propriet_rio_Compartilhado is not null then left(offer2.Propriet_rio_Compartilhado,15)
+				when contratoPU.Propriet_rio_compartilhado is not null then left(contratoPU.Propriet_rio_compartilhado, 15)
+				else left(contratoPU.Propriet_rio_ID, 15)
+			end = left(func.Id, 15)
+	left join reports.user u
+		on (contratoPU.Propriet_rio_ID = u.userid or contratoPU.Propriet_rio_ID = left(u.userid, 15))
+	left join reports.OwnerERP ownerE
+		on case
+			when func.Name IS NOT NULL THEN Upper(func.Name)
+			when u.UserName is not null then Upper(u.UserName)
+			when rp.RepresentantName = 'Marcelo Cabreira' then Upper(u.UserName)
+			else Upper(rp.RepresentantName)
+		   end = Upper(ownerE."Owner")
+	left join reports.OwnerTeam ot
+		on Upper(ownerE.OwnerERP) = Upper(ot.OwnerERP)
+	left join reports.Team t
+		on ot.Team = t.Team
+--v-- estrutura comercial contabilizada por Conta (novas regras Fev 2017) --v--
+	left join salesforce.ctCadastro_de_Funcion_rios func_acc
+		on left(cfacc.id_propriet_rio_cadastro_funcion_rio, 15) = left(func_acc.Id, 15)
+	left join reports.OwnerERP ownerE_acc
+		on Upper(func_acc.Name) = Upper(ownerE_acc."Owner")
+		/*case
+			when func_acc.Name IS NOT NULL THEN Upper(func_acc.Name)
+			when u.UserName is not null then Upper(u.UserName)
+			when rp.RepresentantName = 'Marcelo Cabreira' then Upper(u.UserName)
+			else Upper(rp.RepresentantName)
+		   end = Upper(ownerE_acc."Owner")*/
+	left join reports.OwnerTeam ot_acc
+		on Upper(ownerE_acc.OwnerERP) = Upper(ot_acc.OwnerERP)
+	left join reports.Team t_acc
+		on ot_acc.Team = t_acc.Team
+--v-- estrutura comercial contabilizada por oferta (novas regras Fev 2017) --v--
+	left join salesforce.ctCadastro_de_Funcion_rios func_of
+		on left(offer2.propriet_rio_compartilhado, 15) = left(func_of.Id, 15)
+	left join reports.OwnerERP ownerE_of
+		on Upper(func_of.Name) = Upper(ownerE_of."Owner")
+		 /*case
+			when func_of.Name IS NOT NULL THEN Upper(func_of.Name)
+			when u.UserName is not null then Upper(u.UserName)
+			when rp.RepresentantName = 'Marcelo Cabreira' then Upper(u.UserName)
+			else Upper(rp.RepresentantName)
+		   end = Upper(ownerE_of."Owner")*/
+	left join reports.OwnerTeam ot_of
+		on Upper(ownerE_of.OwnerERP) = Upper(ot_of.OwnerERP)
+	left join reports.Team t_of
+		on ot_of.Team = t_of.Team
+--v-- estrutura comercial contabilizada por contrato (casos do turismo) --v--
+	left join salesforce.ctCadastro_de_Funcion_rios func_con
+		on left(contratoPU.Propriet_rio_compartilhado, 15) = left(func_con.Id, 15)
+	left join reports.OwnerERP ownerE_con
+		on Upper(func_con.Name) = Upper(ownerE_con."Owner")
+		 /*case
+			when func_con.Name IS NOT NULL THEN Upper(func_con.Name)
+			when u.UserName is not null then Upper(u.UserName)
+			when rp.RepresentantName = 'Marcelo Cabreira' then Upper(u.UserName)
+			else Upper(rp.RepresentantName)
+		   end = Upper(ownerE_con."Owner")*/
+	left join reports.OwnerTeam ot_con
+		on Upper(ownerE_con.OwnerERP) = Upper(ot_con.OwnerERP)
+	left join reports.Team t_con
+		on ot_con.Team = t_con.Team
+	---
+	group by
+			dr.EventDate
+		,	date_part(year,dr.EventDate)
+		,	date_part(month,dr.EventDate)
+		,	date_part(day,dr.EventDate)
+		,	case
+				when (t_acc.team = 'Key Account (E-commerce)' or t_of.team = 'Key Account (E-commerce)') then func_of.Name
+				else
+					case
+						when acc.iscalculatedbycontract = 1 then func_con.name
+						else func_acc.name
+					end
+			end
+		,	coalesce(case when (t_acc.team = 'Key Account (E-commerce)' or t_of.team = 'Key Account (E-commerce)') then ownere_of.ownerERP else case when 1=2 then ownere_con.ownerERP else ownere_acc.ownerERP end end,'Em tratamento')
+		,	coalesce(case when (t_acc.team = 'Key Account (E-commerce)' or t_of.team = 'Key Account (E-commerce)') then t_of.coordinator else case when 1=2 then t_con.coordinator else t_acc.coordinator end end,'Em tratamento')
+		,	coalesce(case when (t_acc.team = 'Key Account (E-commerce)' or t_of.team = 'Key Account (E-commerce)') then t_of.manager else case when 1=2 then t_con.manager else t_acc.manager end end,'Em tratamento')
+		,	coalesce(case when (t_acc.team = 'Key Account (E-commerce)' or t_of.team = 'Key Account (E-commerce)') then ot_of.region else case when 1=2 then ot_con.region else ot_acc.region end end,'Em tratamento')
+		,	coalesce(case when (t_acc.team = 'Key Account (E-commerce)' or t_of.team = 'Key Account (E-commerce)') then t_of.team else case when 1=2 then t_con.team else t_acc.team end end,'Em tratamento')
+		,	udis.ContractID
+		,	cast((case when (acc.sharedserviceowner is null or acc.sharedserviceowner = '') then 1 else (100-acc.sharedservicepercent)/100 end) as dec(10,3))
+		,	dr.UnifiedDiscountID
+		,	ndis.DiscountName
+		,	case when offer.Name is not null then offer.Name else null end
+		,	case when op.Name is not null then op.Name else null end
+		,	acc.AccountID
+		,	acc.AccountName
+		,	case
+				when con.Category in
+		('Entretenimento','Entretenimento, Cultura e Vida Noturna','Entretenimento, Cultuta e Vida Noturna','Lazer')
+				then 'Entret. & Lazer'
+				else con.Category
+			end
+		--,	0 "IsCalculatedBycontract"
+		, 	case when (acc.sharedserviceowner is null or acc.sharedserviceowner = '') then 0 else 1 end
+		,	dis.DiscountedValue
+		,	cast(dis.OurCommission as decimal(15,2))
+		,	coalesce(con.DealsClub,0)
+		,	con.PaymentCondition
+		,	con.PaymentConditionName
+		,	coalesce(con.Subdivision,'Não tem')
+		,	con.Type_Site
+		,	case
+				when len(op.categoria_site_oferta) > 1 or op.categoria_site_oferta is not null then op.categoria_site_oferta
+				when len(offer.of_categoria_site) > 1 or offer.of_categoria_site is not null then offer.of_categoria_site
+				else con.Category_Site
+			end
+		,	case
+				when len(op.subcategoria_site_oferta) > 1 or op.subcategoria_site_oferta is not null then op.subcategoria_site_oferta
+				when len(offer.of_categoria_site) > 1 or offer.of_categoria_site is not null then offer.of_categoria_site
+				else con.SubCategory_Site
+			end
+		,	coalesce(con.UseNow,0)
+		,	con.DealCity
+	-------------------------------------------------------------------------------
+	-- LOAD DATA RELATED TO ALL COMMERCIAL ADJUSTMENTS
+	-------------------------------------------------------------------------------
+	union all
+	select
+			ca.EventDate
+		,	date_part(year,ca.EventDate) "EventYear"
+		,	date_part(month,ca.EventDate) "EventMonth"
+		,	date_part(day,ca.EventDate) "EventDay"
+		,	null "Owner"
+		,	ca.OwnerERP
+		,	coalesce(t.Coordinator,'Em tratamento') "Coordinator"
+		,	coalesce(t.ManagerName,'Em tratamento') "Manager"
+		,	coalesce(ot.Region,'Em tratamento') "Region"
+		,	coalesce(ot.Team,'Em tratamento') "Team"
+		,	0 "ContractID"
+		,	0 "UnifiedDiscountID"
+		,	null "DiscountName"
+		,	null "IdOferta"
+		,	null "PurchaseOption"
+		,	'000000000000000' "AccountID"
+		,	null "AccountName"
+		,	null "CategoryName"
+		,	0 "IsCalculatedBycontract"
+		, 	null "HasSharedService"
+		,	0 "DiscountedValue"
+		,	0 "QtyCoupons"
+		,	0 "OurCommission"
+		,	0 "GrossSales"
+		,	0 "GrossSalesWithExtraFeesPU"
+		,	0 "GrossSalesPUCommission"
+		,	0 "CommercialCancelledPosBilling"
+		,	0 "CancelledPreBilling"
+		,	0 "CancelledPreBillingPU"
+		,	0 "NoShow"
+		,	0 "CancelledPosBillingPU"
+		,	0 "ammounttopartner"
+		,	0 "promocodes"
+		,	0 "financecharge"
+		,	0 "antifraudfee"
+		,	0 "aquirerfee"
+		,	0 "anticipationcost"
+		,	0 "taxes"
+		,	0 "extrafees"
+		,	0 "extrafeespu"
+		,	0 "sharedservicepercent"
+		,	0 "cancellationfinancecharge"
+		,	0 "cancellationextrafees"
+		,	0 "cancellationextrafeespu"
+		,	cast(ca.Adjustment as decimal(15,2)) "Adjustment"
+		,	null "DealsClub"
+		,	null "PaymentCondition"
+		,	null "PaymentConditionName"
+		,	null "Subdivision"
+		,	null "Type_Site"
+		,	null "Category_Site"
+		,	null "SubCategory_Site"
+		,	null "UseNow"
+		,	null "DealCity"
+	from reports.CommercialAdjustment ca
+	left join reports.OwnerTeam ot
+		on ca.OwnerERP = ot.OwnerERP
+--		and ot."month" = extract(month from cast(cast(extract(year from getdate()) as char(4)) + '-' + cast(extract(month from getdate()) as char(2)) + '-01' as date) -1)
+--		and ot."year" = extract(year from cast(cast(extract(year from getdate()) as char(4)) + '-' + cast(extract(month from getdate()) as char(2)) + '-01' as date) -1)
+	left join reports.Team t
+		on ot.Team = t.Team
+--		and t."month" = extract(month from cast(cast(extract(year from getdate()) as char(4)) + '-' + cast(extract(month from getdate()) as char(2)) + '-01' as date) -1)
+--		and t."year" = extract(year from cast(cast(extract(year from getdate()) as char(4)) + '-' + cast(extract(month from getdate()) as char(2)) + '-01' as date) -1)
+	where ca.EventDate between
+		cast(cast(extract(year from  getdate()) as char(4)) + '-' + cast(extract(month from getdate()) as char(2)) + '-01' as date)
+		and  cast(cast(extract(year from getdate()) as char(4)) + '-' + cast(extract(month from getdate()) as char(2)) + '-01' as date) -1
+	-------------------------------------------------------------------------------
+	-- LOAD DATA RELATED TO THE SHARED SERVICE
+	-------------------------------------------------------------------------------
+	union all
+	select
+			dr.EventDate
+			,	date_part(year,dr.EventDate) "EventYear"
+			,	date_part(month,dr.EventDate) "EventMonth"
+			,	date_part(day,dr.EventDate) "EventDay"
+			,	coalesce(func.name,'Em tratamento') "Owner"
+			,	coalesce(ownere.ownererp,'Em tratamento') "OwnerERP"
+			,	coalesce(t.coordinator,'Em tratamento') "Coordinator"
+			,	coalesce(t.manager,'Em tratamento') "Manager"
+			,	coalesce(ot.region,'Em tratamento') "Region"
+			,	coalesce(t.team,'Em tratamento') "Team"
+			,	udis.ContractID
+			,	dr.UnifiedDiscountID
+			,	ndis.DiscountName
+			,	case when offer.Name is not null then offer.Name else null end "IdOferta"
+			,	case when op.Name is not null then op.Name else null end "PurchaseOption"
+			,	acc.AccountID
+			,	acc.AccountName
+			,	case
+					when con.Category in	('Entretenimento','Entretenimento, Cultura e Vida Noturna','Entretenimento, Cultuta e Vida Noturna','Lazer')
+					then 'Entret. & Lazer'
+					else con.Category
+				end  "CategoryName"
+			,	0 "IsCalculatedBycontract"
+			, 	case when (acc.sharedserviceowner is null or acc.sharedserviceowner = '') then 0 else 1 end "HasSharedService"
+			,	dis.DiscountedValue
+			,	cast(sum(dr.QTYCoupons )as int) "QtyCoupons"
+			,	cast(dis.OurCommission as decimal(15,2)) "OurCommission"
+			,	sum(dr.GrossSales) "GrossSales"
+			,	sum(dr.GrossSales + dr.extrafeespu) "GrossSalesWithExtraFeesPU"
+			,	sum(dr.GrossSalesPUCommission) "GrossSalesPUCommission"
+			,	sum(case when mdis.MinEventDate >= '2012-08-01' then dr.CancelledPosBilling else 0 end) "CommercialCancelledPosBilling"
+			,	sum(dr.CancelledPreBilling) "CancelledPreBilling"
+			,	sum(dr.CancelledPreBillingPU) "CancelledPreBillingPU"
+			,	sum(dr.NoShow) "NoShow"
+			,	sum(dr.CancelledPosBillingPU) "CancelledPosBillingPU"
+			,	sum(dr.ammounttopartner) "ammounttopartner"
+			,	sum(dr.promocodes) "promocodes"
+			,	sum(dr.financecharge) "financecharge"
+			,	sum(dr.antifraudfee) "antifraudfee"
+			,	sum(dr.aquirerfee) "aquirerfee"
+			,	sum(dr.anticipationcost) "anticipationcost"
+			,	sum(dr.taxes) "taxes"
+			,	sum(dr.extrafees) "extrafees"
+			,	sum(dr.extrafeespu) "extrafeespu"
+			,	cast((case when (acc.sharedserviceowner is null or acc.sharedserviceowner = '') then 0 else acc.sharedservicepercent/100 end) as dec(10,3)) "sharedservicepercent"
+			,	sum(dr.cancellationfinancecharge) "cancellationfinancecharge"
+			,	sum(0) "cancellationextrafees"
+			,	sum(0) "cancellationextrafeespu"
+			,	cast(sum(case when udis.contractid = '165067' then (dr.GrossSales * -0.86) else 0 end) as decimal(15,2)) "Adjustment" -- Camarote Salvador
+			,	coalesce(con.DealsClub,0) "DealsClub"
+			,	con.PaymentCondition
+			,	con.PaymentConditionName
+			,	coalesce(con.Subdivision,'Não tem') "Subdivision"
+			,	con.Type_Site
+			,	case
+					when len(op.categoria_site_oferta) > 1 or op.categoria_site_oferta is not null then op.categoria_site_oferta
+					when len(offer.of_categoria_site) > 1 or offer.of_categoria_site is not null then offer.of_categoria_site
+					else con.Category_Site
+				end "Category_Site"
+			,	case
+					when len(op.subcategoria_site_oferta) > 1 or op.subcategoria_site_oferta is not null then op.subcategoria_site_oferta
+					when len(offer.of_categoria_site) > 1 or offer.of_categoria_site is not null then offer.of_categoria_site
+					else con.SubCategory_Site
+				end	"SubCategory_Site"
+			,	coalesce(con.UseNow,0) "UseNow"
+			,	con.DealCity
+		from #CargaGrossProfit dr
+		left join ods.Discount dis
+			on dis.DiscountID = dr.DiscountID
+		left join ods.UnifiedDiscount udis
+			on dr.UnifiedDiscountID = udis.UnifiedDiscountID
+		left join reports.discountcategory dc
+			on dc.discountcategoryid = dis.discountcategoryid
+		left join salesforce.ctOp_es_de_Compra op
+			on  op.C_digo_Opcao_N_merico = dis.IdOpcaoDeCompra
+		left join salesforce.ctOfertas offer
+			on offer.Id = op.Id_da_Oferta
+		left join salesforce.ctOfertas offer2
+		  on offer2.c_digo_oferta_num_rico = udis.Idoferta
+		left join salesforce.ctcontratopu contratoPU
+			on udis.ContractId = right(contratoPU.Name, 6)
+		left join
+		(
+			select
+				dis.UnifiedDiscountID
+				,	min(DiscountName) DiscountName
+			from ods.Discount dis
+			group by
+				dis.UnifiedDiscountID
+		) ndis
+			on dr.UnifiedDiscountID = ndis.UnifiedDiscountID
+		left join reports.Contract con
+			on con.ContractId = udis.ContractID
+		left join reports.Account acc
+			on acc.AccountID = con.AccountID
+		left join salesforce.cfaccount cfacc
+			on cfacc.id = acc.accountid
+		left join reports.AccountPublication_fech ap
+			on acc.AccountID = ap.AccountID
+		left join reports.UnifiedDiscountCategory udc
+			on udc.UnifiedDiscountID = dr.UnifiedDiscountID
+		left join reports.Category ct
+			on ct.CategoryID = udc.CategoryID
+		left join
+		(
+			select
+				dis.UnifiedDiscountID
+				,	min(dis.RepresentantID) RepresentantID
+			from ods.Discount dis
+			group by
+				dis.UnifiedDiscountID
+		) urp
+			on urp.UnifiedDiscountID = dr.UnifiedDiscountID
+		left join ods.Representant rp
+			on rp.RepresentantID = urp.RepresentantID
+		left join
+		(
+			select
+				dis.UnifiedDiscountID
+				,	min(dr.EventDate) MinEventDate
+			from reports.DiscountRevenue dr  --Temp
+			left join ods.Discount dis
+				on dr.DiscountID = dis.DiscountID
+			where dr.GrossSales > 0
+				and dr.sourceid in (1, 2, 3) --filtro apenas para ofertas do site PU
+			group by
+				dis.UnifiedDiscountID
+		) mdis
+			on mdis.UnifiedDiscountID = dr.UnifiedDiscountID
+	--v-- estrutura comercial contabilizada por --v--
+		inner join salesforce.ctCadastro_de_Funcion_rios func
+			on left(acc.sharedserviceowner,15) = left(func.Id,15) and acc.sharedserviceowner <> ''
+		left join reports.user u
+			on (contratoPU.Propriet_rio_ID = u.userid or contratoPU.Propriet_rio_ID = left(u.userid, 15))
+		left join reports.OwnerERP ownerE
+			on case
+				when func.Name IS NOT NULL THEN Upper(func.Name)
+				when u.UserName is not null then Upper(u.UserName)
+				when rp.RepresentantName = 'Marcelo Cabreira' then Upper(u.UserName)
+				else Upper(rp.RepresentantName)
+			   end = Upper(ownerE."Owner")
+		left join reports.OwnerTeam ot
+			on Upper(ownerE.OwnerERP) = Upper(ot.OwnerERP)
+		left join reports.Team t
+			on ot.Team = t.Team
+		---
+		group by
+				dr.EventDate
+			,	date_part(year,dr.EventDate)
+			,	date_part(month,dr.EventDate)
+			,	date_part(day,dr.EventDate)
+			,	coalesce(func.name,'Em tratamento')
+			,	coalesce(ownere.ownererp,'Em tratamento')
+			,	coalesce(t.coordinator,'Em tratamento')
+			,	coalesce(t.manager,'Em tratamento')
+			,	coalesce(ot.region,'Em tratamento')
+			,	coalesce(t.team,'Em tratamento')
+			,	cast((case when (acc.sharedserviceowner is null or acc.sharedserviceowner = '') then 0 else acc.sharedservicepercent/100 end) as dec(10,3))
+			,	udis.ContractID
+			,	dr.UnifiedDiscountID
+			,	ndis.DiscountName
+			,	case when offer.Name is not null then offer.Name else null end
+			,	case when op.Name is not null then op.Name else null end
+			,	acc.AccountID
+			,	acc.AccountName
+			,	case
+					when con.Category in
+			('Entretenimento','Entretenimento, Cultura e Vida Noturna','Entretenimento, Cultuta e Vida Noturna','Lazer')
+					then 'Entret. & Lazer'
+					else con.Category
+				end
+			--,	0 "IsCalculatedBycontract"
+			, 	case when (acc.sharedserviceowner is null or acc.sharedserviceowner = '') then 0 else 1 end
+			,	dis.DiscountedValue
+			,	cast(dis.OurCommission as decimal(15,2))
+			,	coalesce(con.DealsClub,0)
+			,	con.PaymentCondition
+			,	con.PaymentConditionName
+			,	coalesce(con.Subdivision,'Não tem')
+			,	con.Type_Site
+			,	case
+					when len(op.categoria_site_oferta) > 1 or op.categoria_site_oferta is not null then op.categoria_site_oferta
+					when len(offer.of_categoria_site) > 1 or offer.of_categoria_site is not null then offer.of_categoria_site
+					else con.Category_Site
+				end
+			,	case
+					when len(op.subcategoria_site_oferta) > 1 or op.subcategoria_site_oferta is not null then op.subcategoria_site_oferta
+					when len(offer.of_categoria_site) > 1 or offer.of_categoria_site is not null then offer.of_categoria_site
+					else con.SubCategory_Site
+				end
+			,	coalesce(con.UseNow,0)
+			,	con.DealCity
+		) x
+order by
+	EventDate
+	,	ContractID;
+
+-------------------------------------------------------------------------------
+-- LOAD TARGET TABLE FROM TEMP SOURCE TABLE
+-------------------------------------------------------------------------------
+truncate table reports.DailyCommercialRevenueGrossProfit;
+insert into reports.DailyCommercialRevenueGrossProfit select * from #DailyCommercialRevenueGrossProfit;

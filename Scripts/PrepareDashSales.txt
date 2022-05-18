@@ -1,0 +1,412 @@
+﻿/************************************************************************************************************************************************************
+ Criado por : Luis Perozin
+ Data criação: 2018-04-01
+ Descrição: Retorna todas OP´s online dos ultimos 7 dias 
+ Área: Planejamento SP
+ Dependências: 
+ ods.mng_deals_latest, reports.DiscountRevenue, reports.Discount, ods.Coupons, reports.Discountdetail, 
+ ods.mng_deals_latest_buying_options_ids, salesforce.ctop_es_de_compra, salesforce.ctofertas, reports.contract, 
+ salesforce.ctcontratopu, salesforce.cfaccount, ods.mng_pages_latest, ods.mng_schedulings_latest_deals, reports.cm_regional 
+ ods.pages, reports.cm_regional, reports.dm_employee
+ ************************************************************************************************************************************************************/
+
+drop  table  if exists #cdate;
+select  
+ cast(dt."date" as date)-7 as dt_ini
+,cast(dt."date" as date)-1 as dt_fim
+into #cdate
+from  reports.calendar dt 
+where cast(dt."date" as date)  = cast(dateadd(day,0,getdate()) as date);
+
+
+drop  table  if exists #last_change;
+
+with maxdate as (select  deal_id,max("date") maxdate from  ods.mng_deals_latest_publishing_changes group by 1)
+  select pc.deal_id, pc."action" as status, x.maxdate as Date_last_change
+  into #last_change
+ from  ods.mng_deals_latest_publishing_changes pc
+ inner join maxdate x  on pc.deal_id = x.deal_id   and x.maxdate = pc.date;
+
+-- select count(1) from #last_change;
+
+
+drop  table  if exists #deals_latest;
+select 
+ dl.legacydata_unified_discount_id uid
+,dl.enabled_domains 
+,dl.phoenix_type
+,dl.account_state
+,dl.deal_city
+,dl.account_account_id
+,dl.account_name
+,dl.salesforce_contract_id  
+,dl.idoferta
+,dl.title
+,dl.canonical_url
+,dl.deal_id
+,dl.deal_numeric_id
+,dateadd(day,0,td.date) as eventdate
+,dt_ini
+,dt_fim
+,coalesce(lc.status,'NI') as status 
+,Date_last_change
+,min(dl.publishing_date)  as first_publishingdate	
+,max(dl.publishing_date)  as Last_publishingdate	
+,max(dl.expiration_date)  as end_publishingdate	
+into #deals_latest
+from  #cdate cdt
+inner  join reports.calendar td   on td.date between cdt.dt_ini and cdt.dt_fim
+left   join ods.mng_deals_latest dl  on  dl.legacydata_unified_discount_id <> 0
+                                                                and dateadd(day,0,dl.publishing_date) <=  cdt.dt_fim
+                                                                and dateadd(day,0,dl.expiration_date) >=  cdt.dt_ini
+                                                                and  td.date between  dateadd(day,0,dl.publishing_date) and dateadd(day,0,coalesce(dl.expiration_date,'2099-01-01'))       
+left join #last_change lc on lc.deal_id = dl.deal_id                                                         
+                                                               --and (dl.account_state in ('SP','RS')  or dl.phoenix_type = 'Viagens')  
+                                                               -- and dl.phoenix_type <> 'Produtos'
+where 1 = 1
+--and  td.date between  dateadd(day,0,dl.publishing_date) and dateadd(day,0,coalesce(dl.expiration_date,'2099-01-01'))       
+--and dl.legacydata_unified_discount_id  in ( 215646)--,201911,211435,129801,161730) /*filtro remover*/
+--and dl.deal_id = '5ab93fa5e4b020424d8c8ec6'
+group by 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18;
+--  select count(1)from #deals_latest;
+-- select * from     #deals_latest;
+
+
+
+drop  table  if exists #sl;
+select distinct sld.page,sld.deal_id,sld.deal_numeric_id 
+into #sl
+from   #deals_latest dl
+inner join (select distinct   sld.page,sld.deal_id,sld.deal_numeric_id from ods.mng_schedulings_latest_deals sld) sld on dl.deal_numeric_id  = sld.deal_numeric_id ;
+--inner join #cdate cdt on sld."date"  between  cdt.dt_ini and cdt.dt_fim
+--  select count(1) from #sl;
+
+
+drop  table  if exists #pages;
+select distinct  psd.deal_numeric_id,  pg.pagename ,rg.regional
+into #pages
+from #deals_latest dl
+inner join  (select distinct psd.deal_numeric_id,psd.numeric_id from ods.mng_permanent_scheduling_deals psd) psd  on dl.deal_numeric_id  = psd.deal_numeric_id
+ --   left  join ods.mng_permanent_scheduling ps   on   ps.numeric_id =psd.numeric_id
+      left  join ods.mng_pages_latest  pl on  pl.numeric_id = psd.numeric_id  --pl.pageid = ps.page 
+  	/*adicionar join com a ods.mng_schedulings_latest_deals para buscar paginas   */     
+      left  join ods.page pg on pg.pageid =  pl.legacyregionid 
+      left    join reports.cm_regional rg  on rg.pagename = pg.pagename;     
+-- select count(1) from #pages
+      
+
+
+
+drop  table  if exists #online1;
+/*contas onlines nos ultimos 7 dias por pagina e regional*/
+
+select 
+ dl.uid
+,dl.enabled_domains 
+,dl.phoenix_type
+,dl.account_state
+,dl.deal_city
+,dl.account_account_id
+,dl.account_name
+,dl.salesforce_contract_id  
+,dl.idoferta
+,dl.title
+,dl.canonical_url
+,dl.deal_id
+,dl.deal_numeric_id
+,dl.first_publishingdate	
+,dl.Last_publishingdate	
+,dl.end_publishingdate	
+,dl.eventdate
+,dl.dt_ini
+,dl.dt_fim
+,dl.status 
+,dl.Date_last_change
+,coalesce(listagg( distinct coalesce(sl.page,  pgs.pagename),',') within group (order by dl.uid),'') as pagina_publicacao
+,coalesce(listagg( distinct pgs.regional,',') within group (order by dl.uid),'') as regional
+into #online1
+from #deals_latest dl 
+left join #pages pgs on  pgs.deal_numeric_id = dl.deal_numeric_id
+left  join  #sl sl  on  sl.deal_numeric_id = dl.deal_numeric_id  ---sl.deal_id = dl.deal_id
+where  1 = 1 
+group by 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21;
+--  select count(1)from #online1;
+
+
+
+drop  table  if exists #tags;
+select dlt.deal_id,
+		   coalesce(listagg(distinct case when tag_name = 'regions' then tag_description end,',')	within group (order by tag_description),'N/I') as region,
+		   coalesce(listagg(distinct case when tag_name = 'subcategories' then tag_description end,',')	within group (order by tag_description),'N/I') as subcategories
+into #tags		   
+			from ods.mng_deals_latest_tags dlt 	
+			where tag_name in ('subcategories','regions')		
+			group by 1;
+--  select count(1) from #tags
+
+
+drop  table  if exists #vc;
+/*Total cupons vendidos por opção, busca cap e saldo de cada op*/
+with x as (select distinct  dl.uid from #online1 dl)
+select 
+cast(dd.c_digo_opcao_n_merico as int) as codigo_opcao_numerico,
+dd.op_t_tulo_da_op_o,
+coalesce(max(di.maximumcoupons),0) as cap,
+coalesce(count(distinct cuponid),0)  as qty_total,
+max(di.maximumcoupons) - coalesce(count(distinct cuponid),0)  as saldo
+into #vc
+from  x dl 
+inner join reports.discount di on di.unifieddiscountid = dl.uid 
+inner join reports.discountdetails dd  on di.discountid = dd.discountid
+left  join reports.discountrevenue dr on dr.discountid = di.discountid 
+left  join ods.cupon cp on di.discountid = cp.discountid and couponstatusid = 1
+inner join #cdate cdt on 1 = 1
+where  1 = 1
+group by 1,2;
+-- select count(1) from #vc
+-- select * from #vc
+
+
+
+drop  table  if exists #vc2;
+/*Valor Total vendidos por opção, recita dos ultimos 30 dias da op*/
+with x as (select distinct  dl.uid,dl.idoferta from #online1 dl)
+select distinct
+dl.idoferta,
+cast(dd.c_digo_opcao_n_merico as int) as codigo_opcao_numerico,
+sum(case when cast(dateadd(day,0,dr.eventdate) as date) between  cast(cdt.dt_fim as date)-30 and cast(cdt.dt_fim as date) 
+         then  coalesce(dr.grosssales,0) + coalesce(dr.financecharge,0) + coalesce(dr.extrafees,0)
+           else 0 end)  over (partition by dl.idoferta) as GMV30_of,
+sum(case when cast(dateadd(day,0,dr.eventdate) as date) between  cast(cdt.dt_fim as date)-30 and cast(cdt.dt_fim as date) 
+         then  coalesce(dr.grosssalespucommission,0) + coalesce(dr.administrativefee,0) 	-  coalesce(dr.cancelledprebillingpu,0) - coalesce(dr.cancelledposbilling,0)
+         else 0 end)  over (partition by dl.idoferta) as recceita30_of ,
+sum(case when cast(dateadd(day,0,dr.eventdate) as date) between  cast(cdt.dt_fim as date)-30 and cast(cdt.dt_fim as date) 
+         then  coalesce(dr.grosssalespucommission,0) + coalesce(dr.administrativefee,0) 	-  coalesce(dr.cancelledprebillingpu,0) - coalesce(dr.cancelledposbilling,0)
+         else 0 end)  over (partition by cast(dd.c_digo_opcao_n_merico as int) ) as recceita30  ,
+sum(case when cast(dateadd(day,0,dr.eventdate) as date) between  cast(cdt.dt_fim as date)-30 and cast(cdt.dt_fim as date) 
+         then ((coalesce(grosssalespucommission,0) + 
+	    coalesce(dr.administrativefee,0) + 
+		coalesce(dr.financecharge,0) + 
+		coalesce(dr.extrafeespu,0) +
+		coalesce(dr.noshow,0))
+		-
+		(coalesce(dr.cancelledprebillingpu,0) +
+		coalesce(dr.cancelledposbillingpu,0) +
+		coalesce(dr.cancellationfinancecharge,0) +
+		coalesce(dr.cancellationextrafeespu,0) +
+		coalesce(dr.administrativefeecancelled,0))
+		-
+		(coalesce(dr.aquirerfee,0) +
+		coalesce(dr.anticipationcost,0) +
+		coalesce(dr.antifraudfee,0) +
+		coalesce(dr.promocodes,0))
+		+
+		coalesce(dr.cancellationpromocodes,0)) else 0 end) over (partition by cast(dd.c_digo_opcao_n_merico as int))   as  Lucro_bruto30	,
+sum(case when cast(dateadd(day,0,dr.eventdate) as date) between  cast(cdt.dt_fim as date)-30 and cast(cdt.dt_fim as date) 
+         then ((coalesce(grosssalespucommission,0) + 
+	    coalesce(dr.administrativefee,0) + 
+		coalesce(dr.financecharge,0) + 
+		coalesce(dr.extrafeespu,0) +
+		coalesce(dr.noshow,0))
+		-
+		(coalesce(dr.cancelledprebillingpu,0) +
+		coalesce(dr.cancelledposbillingpu,0) +
+		coalesce(dr.cancellationfinancecharge,0) +
+		coalesce(dr.cancellationextrafeespu,0) +
+		coalesce(dr.administrativefeecancelled,0))
+		-
+		(coalesce(dr.aquirerfee,0) +
+		coalesce(dr.anticipationcost,0) +
+		coalesce(dr.antifraudfee,0) +
+		coalesce(dr.promocodes,0))
+		+
+		coalesce(dr.cancellationpromocodes,0)) else 0 end) over (partition by dl.idoferta)   as  Lucro_bruto30_of	      		
+into #vc2
+from  x dl 
+inner join reports.discount di on di.unifieddiscountid = dl.uid 
+inner join reports.discountrevenue dr on dr.discountid = di.discountid 
+inner join reports.discountdetails dd  on dr.discountid = dd.discountid  -- and dd.c_digo_oferta_num_rico = dr.buyingoptionnumericid /*não funciona*/
+inner join #cdate cdt on 1 = 1
+where 1 = 1	
+and coalesce(dr.qtycoupons,0) >= 1
+--group by 1,2
+--having SUM(coalesce(dr.qtycoupons,0)) >= 1
+;
+-- select count(1) from #vc2;    --31967
+-- select * from #vc2
+
+drop  table  if exists  reports.dashsales8;
+select
+     dl.dt_ini
+    ,dl.dt_fim
+    ,getdate() as  DateLoad 
+    ,dl.deal_id
+    ,bo.buying_option_id
+    ,op.divulgar_oferta_em_lista as canal
+   	,dl.enabled_domains as plataforma
+   	,dl.account_account_id  as id_conta
+   	,coalesce(dl.account_name,bo.account_name) as nome_conta
+    ,dl.eventdate as dt_evento
+	,coalesce(case when emof.sales_team = 'Key Account (E-commerce)' or emh.sales_team = 'Key Account (E-commerce)' --or emf.sales_team = 'Key Account (E-commerce)'
+	   then emof.sales_manager
+	   else
+	    case when  ac.apura_o_pelo_contrato = 1  and emh.sales_team not like 'Sao Paulo%' and emh.sales_team not like '%Turismo%'
+	     then emct.sales_manager
+	     else emh.sales_manager
+	    end
+	  end, '') as  "sales_manager compartilhado"
+	,coalesce(case when emof.sales_team = 'Key Account (E-commerce)' or emh.sales_team = 'Key Account (E-commerce)' --or emf.sales_team = 'Key Account (E-commerce)'
+	   then emof.sales_coordinator
+	   else
+	    case when  ac.apura_o_pelo_contrato = 1  and emh.sales_team not like 'Sao Paulo%' and emh.sales_team not like '%Turismo%'
+	     then emct.sales_coordinator
+	     else emh.sales_coordinator
+	    end
+	  end,'') as "sales_coordinator compartilhado"
+	,coalesce(case when emof.sales_team = 'Key Account (E-commerce)' or emh.sales_team = 'Key Account (E-commerce)' --or emf.sales_team = 'Key Account (E-commerce)'
+	   then emof.name
+	   else
+	    case when  ac.apura_o_pelo_contrato = 1  and emh.sales_team not like 'Sao Paulo%' and emh.sales_team not like '%Turismo%'
+	     then emct.name
+	     else emh.name
+	    end
+	  end,'') as  "compartilhado" 
+	,coalesce(case when emof.sales_team = 'Key Account (E-commerce)' or emf.sales_team = 'Key Account (E-commerce)' or emh.sales_team = 'Key Account (E-commerce)'
+	   then ''
+	   else
+	    case when  ac.apura_o_pelo_contrato = 1  and emf.sales_team not like 'Sao Paulo%' and emf.sales_team not like '%Turismo%'
+	     then ''
+	     else emf.sales_manager
+	    end
+	  end,'') as "sales_manager compartilhado farmer"
+	,coalesce(case when emof.sales_team = 'Key Account (E-commerce)' or emf.sales_team = 'Key Account (E-commerce)' or emh.sales_team = 'Key Account (E-commerce)'
+	   then ''
+	   else
+	    case when  ac.apura_o_pelo_contrato = 1  and emf.sales_team not like 'Sao Paulo%' and emf.sales_team not like '%Turismo%'
+	     then ''
+	     else emf.sales_coordinator
+	    end
+	  end,'') as "sales_coordinator compartilhado farmer"
+	,coalesce(case when emof.sales_team = 'Key Account (E-commerce)' or emf.sales_team = 'Key Account (E-commerce)' or emh.sales_team = 'Key Account (E-commerce)'
+	   then ''
+	   else
+	    case when  ac.apura_o_pelo_contrato = 1  and emf.sales_team not like 'Sao Paulo%' and emf.sales_team not like '%Turismo%'
+	     then ''
+	     else emf.name
+	    end
+	  end,'') as "compartilhado farmer"
+   	,dl.phoenix_type as vertical
+    ,dl.account_state as uf  	
+	,offer.of_categoria_site  as site_categoria
+	,offer.of_subcategoria_site as site_sub_categoria
+   	,offer.of_sub_subcategoria_site as site_sub_subcategoria
+   	,offer.of_condi_o_de_pagamento_da_oferta as codicao_pagamento
+   	,offer.tipo_de_pagamento as tipo_pagamento
+	,offer.of_p_gina_de_publica_o as pagina_publicacao_principal_of
+ 	,tags.region
+   	,bo.account_city  as Cidade_do_Contrato
+   	,dl.deal_city as Cidade_de_publicacao
+   	,bo.account_neighborhood as bairro
+  	,dl.uid as uid 	
+	,offer.name as Oferta_Nome
+	,regexp_replace(dl.title, '\r|\n|\t','g')  as Titulo 
+    ,dl.status 
+    ,dl.Date_last_change	
+	,op.name as codigo_opcao
+	,op.op_t_tulo_da_op_o as titulo_opcao 
+    ,dl.pagina_publicacao
+    ,dl.canonical_url
+    ,bo.marketing_campaign marketing_campaign
+    ,coalesce(cast(left(offer.of_data_espec_fica_de_t_rmino_validade,10) as varchar), cast(offer.of_validade_do_cupom_em_meses as varchar)) validade_oferta
+    ,min(dl.first_publishingdate)	as first_publishingdate
+    ,max(dl.Last_publishingdate) as Last_publishingdate
+    ,max(dl.end_publishingdate) as end_publishingdate	
+    ,max(case when  (case when (dateadd(day,0,bo.start)) = '0001-01-01 00:00:00' then null else  (dateadd(day,0,bo.start)) end)  > (dateadd(day,0, dl.last_publishingdate))
+		      then (dateadd(day,0,bo.start)) 
+	           else (dateadd(day,0,dl.last_publishingdate)) 
+	           end) dt_entrada_op	    
+    ,max(case when  (bo."end")  is null or  (bo."end")  = '0001-01-01 00:00:00'  then    (dateadd(day,0,dl.end_publishingdate)) 
+	         when   (dateadd(day,0,dl.end_publishingdate)) <  (dateadd(day,0,bo."end"))  then  (dateadd(day,0,dl.end_publishingdate))  
+	           else  (dateadd(day,0,bo."end"))
+	           end)as dt_saida_op
+    ,max(cast(op.op_pre_o_original as float)) as Preco_Original
+    ,max(cast(op.op_pre_o_final as float)) as Preco_de_Venda
+    ,max(cast(op.op_repasse_p_parceiro_por_unidade as float)) as Vl_Repasse_Parceiro	
+    ,max(coalesce(vc.cap,bo.available_units)) as CAP_Inicial_de_Cupons_A
+    ,max(coalesce(vc.Qty_total,0)) as Qty_total_Cupons_vendidos_B
+    ,max(coalesce(vc.saldo,bo.available_units)) as saldo_de_cupons_AB 
+    ,sum(case when cast(dateadd(day,0,dr.eventdate) as date) >= dateadd(day,0,dl.dt_fim) then coalesce(dr.qtycoupons,0) else 0 end) CP_vendidos_D1
+    ,sum(coalesce(dr.qtycoupons,0))  as CP_vendidos_last7
+    ,sum(coalesce(dr.qtycouponcancelledposbilling,0)) as Cupons_Cancelados
+    ,sum(coalesce(dr.grosssales,0)) as Grosssales			
+	,sum(coalesce(dr.grosssalespucommission,0)) as Grosssalespucommission			
+	,sum(coalesce(dr.noshow,0)) as Noshow			
+	,sum(coalesce(dr.grossrevenue,0)) as Grossrevenue			
+	,sum(coalesce(dr.promocodes,0)) as Promocodes
+	,sum(coalesce(dr.cancellationpromocodes,0)) as  Cancellationpromocodes			
+    ,sum((coalesce(grosssalespucommission,0) + 
+	    coalesce(dr.administrativefee,0) + 
+		coalesce(dr.financecharge,0) + 
+		coalesce(dr.extrafeespu,0) +
+		coalesce(dr.noshow,0))
+		-
+		(coalesce(dr.cancelledprebillingpu,0) +
+		coalesce(dr.cancelledposbillingpu,0) +
+		coalesce(dr.cancellationfinancecharge,0) +
+		coalesce(dr.cancellationextrafeespu,0) +
+		coalesce(dr.administrativefeecancelled,0))
+		-
+		(coalesce(dr.aquirerfee,0) +
+		coalesce(dr.anticipationcost,0) +
+		coalesce(dr.antifraudfee,0) +
+		coalesce(dr.promocodes,0))
+		+
+		coalesce(dr.cancellationpromocodes,0)) as  Lucro_bruto				
+       ,sum(coalesce(dr.grosssales,0) + coalesce(dr.financecharge,0) + coalesce(dr.extrafees,0))  GMV			
+       ,sum(coalesce(dr.grosssalespucommission,0) + coalesce(dr.administrativefee,0) 	-  coalesce(dr.cancelledprebillingpu,0) - coalesce(dr.cancelledposbilling,0)) as Receita_Comercial
+       ,max(coalesce(vc2.recceita30,0)) as Receita_Comercial_ult30
+       ,max(coalesce(vc2.recceita30_of,0)) as Receita_Comercial_ult30_oferta
+       ,max(coalesce(vc2.Lucro_bruto30,0)) as Lucro_Bruto30
+       ,max(coalesce(vc2.Lucro_bruto30_of,0)) as Lucro_Bruto_ult30_oferta
+       ,max(coalesce(GMV30_of,0)) as GMV_ult30_oferta
+	into reports.dashsales8
+    from   #online1 dl
+    inner   join ods.mng_deals_latest_buying_options bo on bo.deal_numeric_id = dl.deal_numeric_id and (case when bo."end"  is null or bo."end"  = '0001-01-01 00:00:00'  
+                                                                                                             then '2050-01-01' else bo."end" end  ) >=  dl.dt_ini
+                                                                                                   and bo.active = true
+                                                                                                   and ((bo.booking_enabled = true and bo.booking_done = true)  or (bo.booking_enabled = false))                                
+    inner   join ods.mng_deals_latest_buying_options_ids as ids on ids.buying_option_id = bo.buying_option_id 
+    inner   join salesforce.ctop_es_de_compra op          on bo.idopcaodecompra = op.c_digo_opcao_n_merico  --op.id = bo.salesforce_id                           
+ 	inner   join salesforce.ctofertas offer           on offer.name =  op.nome_da_oferta_texto  
+    left    join reports.contract con	                  on con.salesforcecontractid = dl.salesforce_contract_id  
+    left    join salesforce.ctcontratopu ctpu             on ctpu.id = con.salesforcecontractid   
+    left    join salesforce.cfaccount ac                  on ac.id = dl.account_account_id 
+    left    join #vc as vc				  on op.c_digo_opcao_n_merico = vc.codigo_opcao_numerico  
+    left    join #vc2 as vc2				  on op.c_digo_opcao_n_merico = vc2.codigo_opcao_numerico
+    left    join reports.dm_employee emf                  on emf.employee_sf_code = ac.propriet_rio_compartilhado_farmer and emf.active_dw_version = 'Y'
+    left    join reports.dm_employee emh                  on emh.employee_sf_code = ac.propriet_rio_compartilhado and emh.active_dw_version = 'Y'
+    left    join reports.dm_employee emct                 on emct.employee_sf_code = ctpu.propriet_rio_compartilhado and emct.active_dw_version = 'Y'
+    left    join reports.dm_employee emof                 on emof.employee_sf_code = offer.propriet_rio_compartilhado and emof.active_dw_version = 'Y'	
+    left    join #tags as tags                            on tags.deal_id = dl.deal_id  	
+    left    join ods.discount di (nolock)                 on di.unifieddiscountid = dl.uid  and ids.buying_option_id = di.buyingoptionid  
+    left    join reports.discountrevenue dr               on dr.discountid = di.discountid   
+							     and dateadd(day,0,dr.eventdate) = dateadd(day,0,dl.eventdate)
+							     and dateadd(day,0,dr.eventdate) between dl.dt_ini and dl.dt_fim
+    where 1=1	
+        and  bo.idopcaodecompra > 0
+		and not  ( 
+		          dl.status in ('Encerrar','Esgotar','Ocultar') 
+		             and 
+			      dl.eventdate >= isnull(dl.Date_last_change,'2090-01-01')
+		           ) 
+group by 1, 2, 3 , 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18 ,19, 20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39;
+
+grant all on reports.dashsales8 to group bi_group;
+grant all on reports.dashsales8 to group bi_group_r;
+
+
+
+
+
+
+

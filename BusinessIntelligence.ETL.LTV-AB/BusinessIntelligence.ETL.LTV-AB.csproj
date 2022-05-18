@@ -1,0 +1,161 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="12.0" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
+    <Platform Condition=" '$(Platform)' == '' ">x86</Platform>
+    <ProductVersion>8.0.30703</ProductVersion>
+    <SchemaVersion>2.0</SchemaVersion>
+    <ProjectGuid>{A61FA848-0FEC-4F39-AF17-69E71006B04A}</ProjectGuid>
+    <OutputType>Exe</OutputType>
+    <AppDesignerFolder>Properties</AppDesignerFolder>
+    <RootNamespace>BusinessIntelligence.ETL.LTV_AB</RootNamespace>
+    <AssemblyName>BusinessIntelligence.ETL.LTV-AB</AssemblyName>
+    <TargetFrameworkVersion>v4.8</TargetFrameworkVersion>
+    <TargetFrameworkProfile>
+    </TargetFrameworkProfile>
+    <FileAlignment>512</FileAlignment>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|x86' ">
+    <PlatformTarget>AnyCPU</PlatformTarget>
+    <DebugSymbols>true</DebugSymbols>
+    <DebugType>full</DebugType>
+    <Optimize>false</Optimize>
+    <OutputPath>bin\Debug\</OutputPath>
+    <DefineConstants>DEBUG;TRACE</DefineConstants>
+    <ErrorReport>prompt</ErrorReport>
+    <WarningLevel>4</WarningLevel>
+    <Prefer32Bit>false</Prefer32Bit>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|x86' ">
+    <PlatformTarget>x86</PlatformTarget>
+    <DebugType>pdbonly</DebugType>
+    <Optimize>true</Optimize>
+    <OutputPath>bin\Release\</OutputPath>
+    <DefineConstants>TRACE</DefineConstants>
+    <ErrorReport>prompt</ErrorReport>
+    <WarningLevel>4</WarningLevel>
+    <Prefer32Bit>false</Prefer32Bit>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="System" />
+    <Reference Include="System.Core" />
+    <Reference Include="System.Xml.Linq" />
+    <Reference Include="System.Data.DataSetExtensions" />
+    <Reference Include="Microsoft.CSharp" />
+    <Reference Include="System.Data" />
+    <Reference Include="System.Xml" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="LTVTest.cs" />
+    <Compile Include="LTVTestGroup.cs" />
+    <Compile Include="Program.cs" />
+    <Compile Include="Properties\AssemblyInfo.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="LTVCompradoresIPhone-A.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\BusinessIntelligence.Common\BusinessIntelligence.Common.csproj">
+      <Project>{7E29ADDD-D954-4319-872F-057D4271CDE7}</Project>
+      <Name>BusinessIntelligence.Common</Name>
+    </ProjectReference>
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="LTVCompradoresIPhone-B.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="LTVCompradoresIPhone-C.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="CreateUsersAnalysis.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="SelectGroup.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="InsertLTVComparison.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="LTVCinema-A.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="LTVCinema-B.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="LTVVitoria-B.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="LTVVitoria-A.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="ExclusionCriterial.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="LTVCocoBambu-A.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="LTVCocoBambu-B.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="InsertLTVComparisonDetail.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="LTVFlyersCinema-B.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="LTVFlyersCinema-A.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="LTVCinema1RS-A.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="LTVCinema1RS-B.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="RefreshPurchaseOrder.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="LTVLocal-A.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="LTVLocal-B.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="LTVLocal-C.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="LTVViagens-C.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="LTVViagens-A.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="LTVViagens-B.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="LTVProdutos-A.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="LTVProdutos-B.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="LTVProdutos-C.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="LTVKinoplex-B.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="LTVKinoplex-A.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="app.config" />
+  </ItemGroup>
+  <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+  <!-- To modify your build process, add your task inside one of the targets below and uncomment it. 
+       Other similar extension points exist, see Microsoft.Common.targets.
+  <Target Name="BeforeBuild">
+  </Target>
+  <Target Name="AfterBuild">
+  </Target>
+  -->
+</Project>

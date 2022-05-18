@@ -1,0 +1,96 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="12.0" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
+    <Platform Condition=" '$(Platform)' == '' ">x86</Platform>
+    <ProductVersion>8.0.30703</ProductVersion>
+    <SchemaVersion>2.0</SchemaVersion>
+    <ProjectGuid>{549F5835-D5D6-46F3-BE68-4FEC785E1DB9}</ProjectGuid>
+    <OutputType>Exe</OutputType>
+    <AppDesignerFolder>Properties</AppDesignerFolder>
+    <RootNamespace>BusinessIntelligence.ETL.Email.ReturnPathReport</RootNamespace>
+    <AssemblyName>BusinessIntelligence.ETL.Email.ReturnPathReport</AssemblyName>
+    <TargetFrameworkVersion>v4.8</TargetFrameworkVersion>
+    <TargetFrameworkProfile>
+    </TargetFrameworkProfile>
+    <FileAlignment>512</FileAlignment>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|x86' ">
+    <PlatformTarget>AnyCPU</PlatformTarget>
+    <DebugSymbols>true</DebugSymbols>
+    <DebugType>full</DebugType>
+    <Optimize>false</Optimize>
+    <OutputPath>bin\Debug\</OutputPath>
+    <DefineConstants>DEBUG;TRACE</DefineConstants>
+    <ErrorReport>prompt</ErrorReport>
+    <WarningLevel>4</WarningLevel>
+    <Prefer32Bit>false</Prefer32Bit>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|x86' ">
+    <PlatformTarget>x86</PlatformTarget>
+    <DebugType>pdbonly</DebugType>
+    <Optimize>true</Optimize>
+    <OutputPath>bin\Release\</OutputPath>
+    <DefineConstants>TRACE</DefineConstants>
+    <ErrorReport>prompt</ErrorReport>
+    <WarningLevel>4</WarningLevel>
+    <Prefer32Bit>false</Prefer32Bit>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="CommandLine">
+      <HintPath>..\BusinessIntelligence.Integration.GoogleAnalytics\bin\Debug\CommandLine.dll</HintPath>
+    </Reference>
+    <Reference Include="OpenPop">
+      <HintPath>..\..\OpenPop.NET 2.0.5\OpenPop.NET 2.0.5\binaries\unsigned\OpenPop.dll</HintPath>
+    </Reference>
+    <Reference Include="System" />
+    <Reference Include="System.Core" />
+    <Reference Include="System.Xml.Linq" />
+    <Reference Include="System.Data.DataSetExtensions" />
+    <Reference Include="Microsoft.CSharp" />
+    <Reference Include="System.Data" />
+    <Reference Include="System.Xml" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+    <Compile Include="Properties\AssemblyInfo.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\BusinessIntelligence.Common\BusinessIntelligence.Common.csproj">
+      <Project>{7E29ADDD-D954-4319-872F-057D4271CDE7}</Project>
+      <Name>BusinessIntelligence.Common</Name>
+    </ProjectReference>
+    <ProjectReference Include="..\BusinessIntelligence.Data.Redshift\BusinessIntelligence.Data.Redshift.csproj">
+      <Project>{9DD434CC-D890-48DB-8FB4-5A648AD23427}</Project>
+      <Name>BusinessIntelligence.Data.Redshift</Name>
+    </ProjectReference>
+    <ProjectReference Include="..\BusinessIntelligence.ETL\BusinessIntelligence.ETL.csproj">
+      <Project>{8E770CDC-29D1-4EEC-BB7D-3EE48E8C0AA2}</Project>
+      <Name>BusinessIntelligence.ETL</Name>
+    </ProjectReference>
+    <ProjectReference Include="..\BusinessIntelligence.IMAPClient\BusinessIntelligence.IMAPClient.csproj">
+      <Project>{909F2474-1F08-478C-BEB4-1CBCA3D04D49}</Project>
+      <Name>BusinessIntelligence.IMAPClient</Name>
+    </ProjectReference>
+    <ProjectReference Include="..\BusinessIntelligence.MIME\BusinessIntelligence.MIME.csproj">
+      <Project>{634B0667-4C7D-4E0A-BA15-FEAD9DA0F44A}</Project>
+      <Name>BusinessIntelligence.MIME</Name>
+    </ProjectReference>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="App.config">
+      <SubType>Designer</SubType>
+    </None>
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="RefreshReturnPathReport.txt" />
+  </ItemGroup>
+  <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+  <!-- To modify your build process, add your task inside one of the targets below and uncomment it. 
+       Other similar extension points exist, see Microsoft.Common.targets.
+  <Target Name="BeforeBuild">
+  </Target>
+  <Target Name="AfterBuild">
+  </Target>
+  -->
+</Project>

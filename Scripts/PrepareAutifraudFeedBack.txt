@@ -1,0 +1,371 @@
+drop table if exists paymentantifraudhistory_datasend;
+CREATE TEMPORARY TABLE paymentantifraudhistory_datasend (
+	datasend varchar(65535),
+	purchasepaymentdataid int4
+)
+diststyle key
+distkey (purchasepaymentdataid)
+sortkey (purchasepaymentdataid);
+
+drop table if exists paymentantifraudhistory_id;
+CREATE TEMPORARY TABLE paymentantifraudhistory_id (
+	paymentantifraudhistoryid int4,
+	purchasepaymentdataid int4
+)
+diststyle key
+distkey (paymentantifraudhistoryid)
+sortkey (paymentantifraudhistoryid, purchasepaymentdataid);
+
+--pega id historico para buscar os dados de cpf,ip,telefone rede;
+insert into paymentantifraudhistory_id(
+	paymentantifraudhistoryid,
+	purchasepaymentdataid
+)
+select distinct pah.paymentantifraudhistoryid, ppd.purchasepaymentdataid
+	from ods.paymentantifraudhistory pah
+		inner join ods.paymentantifraud pa on pa.paymentantifraudid = pah.paymentantifraudid-- and pa.paymentantifraudclassid = 8
+		inner join ods.purchasepaymentdata ppd on ppd.purchasepaymentdataid = pa.purchasepaymentdataid
+		inner join stage.redecancelfeedback fb on fb.purchasepaymentdataid = ppd.purchasepaymentdataid
+		left join reports.AntifraudFeedBack afb on afb.purchasepaymentdataid = fb.purchasepaymentdataid
+	where afb.purchasepaymentdataid is null; 
+	
+--pega id historico para buscar os dados de cpf,ip,telefone adyen;
+insert into paymentantifraudhistory_id(
+	paymentantifraudhistoryid,
+	purchasepaymentdataid
+)
+select distinct pah.paymentantifraudhistoryid, ppd.purchasepaymentdataid
+	from ods.paymentantifraudhistory pah
+		inner join ods.paymentantifraud pa on pa.paymentantifraudid = pah.paymentantifraudid-- and pa.paymentantifraudclassid = 8
+		inner join ods.purchasepaymentdata ppd on ppd.purchasepaymentdataid = pa.purchasepaymentdataid
+		inner join stage.adyencancelfeedback fb on fb.purchasepaymentdataid = ppd.purchasepaymentdataid
+		left join reports.AntifraudFeedBack afb on afb.purchasepaymentdataid = fb.purchasepaymentdataid
+	where afb.purchasepaymentdataid is null;
+
+--pega id historico para buscar os dados de cpf,ip,telefone cielo;
+insert into paymentantifraudhistory_id(
+	paymentantifraudhistoryid,
+	purchasepaymentdataid
+)
+select distinct pah.paymentantifraudhistoryid, ppd.purchasepaymentdataid
+	from ods.paymentantifraudhistory pah
+		inner join ods.paymentantifraud pa on pa.paymentantifraudid = pah.paymentantifraudid-- and pa.paymentantifraudclassid = 8
+		inner join ods.purchasepaymentdata ppd on ppd.purchasepaymentdataid = pa.purchasepaymentdataid
+		inner join stage.cielocancelfeedback fb on fb.purchasepaymentdataid = ppd.purchasepaymentdataid
+		left join reports.AntifraudFeedBack afb on afb.purchasepaymentdataid = fb.purchasepaymentdataid
+	where afb.purchasepaymentdataid is null;
+
+--pega id historico para buscar os dados de cpf,ip,telefone stone;
+insert into paymentantifraudhistory_id(
+	paymentantifraudhistoryid,
+	purchasepaymentdataid
+)
+select distinct pah.paymentantifraudhistoryid, ppd.purchasepaymentdataid
+	from ods.paymentantifraudhistory pah
+		inner join ods.paymentantifraud pa on pa.paymentantifraudid = pah.paymentantifraudid
+		inner join ods.purchasepaymentdata ppd on ppd.purchasepaymentdataid = pa.purchasepaymentdataid
+		inner join stage.stonecancelfeedback fb on fb.purchasepaymentdataid = ppd.purchasepaymentdataid
+		left join reports.AntifraudFeedBack afb on afb.purchasepaymentdataid = fb.purchasepaymentdataid
+	where afb.purchasepaymentdataid is null; 
+
+insert into paymentantifraudhistory_datasend (
+	datasend,
+	purchasepaymentdataid
+)
+select distinct pah.datasend, paht.purchasepaymentdataid
+from paymentantifraudhistory_id paht
+	inner join ods.paymentantifraudhistory pah on paht.paymentantifraudhistoryid = pah.paymentantifraudhistoryid
+    where pah.datasend <> '';
+    
+drop table if exists paymentantifraudhistory_id;
+
+--rede
+insert into reports.AntifraudFeedBack (
+	typefeedback,
+	purchasepaymentdataid,
+	useraccountid,
+	deviceinstallid,
+	facebookuserid,
+	emailaddress,
+	password,
+	ddd,
+	telefone,
+	CPF,
+	IP,
+	cardnumber,
+	cardholdername,
+	expirationyear,
+	expirationmonth,
+	eventdate,
+	value,
+	cardtype
+) 
+select
+		  'Rede' as typefeedback
+		, fb.purchasepaymentdataid 
+		, ppd.useraccountid
+ 		, p.deviceinstallid
+ 		, uafc.facebookuserid
+ 		, COALESCE(max((case 
+ 						when replace(regexp_substr(pah.datasend,'<UserEmail>[A-Za-z0-9.:/_%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]'),'<UserEmail>','') = '' then (replace(regexp_substr(pah.datasend,'<_document_ClearSale_Orders_Order_Email>[A-Za-z0-9.:/_%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]'),'<_document_ClearSale_Orders_Order_Email>',''))
+ 						else replace(regexp_substr(pah.datasend,'<UserEmail>[A-Za-z0-9.:/_%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]'),'<UserEmail>','')
+ 					end)),ua.emailaddress) emailaddress
+ 		, ua.password 
+		, max(case 
+				when left(replace(regexp_substr(pah.datasend,'<billingNumber>[A-Za-z0-9.:/-]*'),'<billingNumber>',''),2) <> '' then left(replace(regexp_substr(pah.datasend,'<billingNumber>[A-Za-z0-9.:/-]*'),'<billingNumber>',''),2)
+				when (replace(regexp_substr(pah.datasend,'<_document_ClearSale_Orders_Order_CollectionData_Phones_Phone_DDD>[A-Za-z0-9– . –]*'),'<_document_ClearSale_Orders_Order_CollectionData_Phones_Phone_DDD>','')) <> '' then (replace(regexp_substr(pah.datasend,'<_document_ClearSale_Orders_Order_CollectionData_Phones_Phone_DDD>[A-Za-z0-9– . –]*'),'<_document_ClearSale_Orders_Order_CollectionData_Phones_Phone_DDD>',''))
+				else left(replace(regexp_substr(pah.datasend,'<_document_RequestScore_Telephone>[A-Za-z0-9– . –]*'),'<_document_RequestScore_Telephone>',''),2) end 
+		  ) as DDD
+		, max(case
+				when right(replace(regexp_substr(pah.datasend,'<billingNumber>[A-Za-z0-9.:/-]*'),'<billingNumber>',''),9) <> '' then right(replace(regexp_substr(pah.datasend,'<billingNumber>[A-Za-z0-9.:/-]*'),'<billingNumber>',''),9) 
+				when (replace(regexp_substr(pah.datasend,'<_document_ClearSale_Orders_Order_CollectionData_Phones_Phone_Number>[A-Za-z0-9– . –]*'),'<_document_ClearSale_Orders_Order_CollectionData_Phones_Phone_Number>','')) <> '' then (replace(regexp_substr(pah.datasend,'<_document_ClearSale_Orders_Order_CollectionData_Phones_Phone_Number>[A-Za-z0-9– . –]*'),'<_document_ClearSale_Orders_Order_CollectionData_Phones_Phone_Number>',''))
+				else right(replace(regexp_substr(pah.datasend,'<_document_RequestScore_Telephone>[A-Za-z0-9– . –]*'),'<_document_RequestScore_Telephone>',''),9) end 
+		   ) as TELEFONE
+		, max(case
+				when replace(regexp_substr(pah.datasend,'<billingCPF>[A-Za-z0-9.:/-]*'),'<billingCPF>','') = '' then (replace(regexp_substr(pah.datasend,'<_document_ClearSale_Orders_Order_CollectionData_LegalDocument1>[A-Za-z0-9.:/-]*'),'<_document_ClearSale_Orders_Order_CollectionData_LegalDocument1>',''))
+				else replace(regexp_substr(pah.datasend,'<billingCPF>[A-Za-z0-9.:/-]*'),'<billingCPF>','') end
+		   ) as CPF
+		, max(case
+				when replace(regexp_substr(pah.datasend,'<ipAddress>[A-Za-z0-9.:/-]*'),'<ipAddress>','') = '' then (replace(regexp_substr(pah.datasend,'<_document_ClearSale_Orders_Order_IP>[A-Za-z0-9.:/-]*'),'<_document_ClearSale_Orders_Order_IP>',''))
+				else replace(regexp_substr(pah.datasend,'<ipAddress>[A-Za-z0-9.:/-]*'),'<ipAddress>','') end 
+		   ) as IP		
+		, max(replace(ppd.cardnumber,'"','')) as cardnumber
+		, max(ppd.cardholdername) as cardholdername
+		, max(ppd.expirationyear) as expirationyear
+		, max(ppd.expirationmonth) as expirationmonth
+		, max(COALESCE(fb.transactiondate, fb.entereddate)) as eventdate
+		, max(fb.value) as value
+		, max(replace(fb.cardtype,'"','')) as cardtype
+from stage.redecancelfeedback fb
+	inner join ods.purchasepaymentdata ppd on fb.purchasepaymentdataid = ppd.purchasepaymentdataid
+    left join paymentantifraudhistory_datasend pah on fb.purchasepaymentdataid = pah.purchasepaymentdataid
+	left join ods.purchase p on p.purchaseid = ppd.internalreferencenumber
+	left JOIN stage.useraccountfacebookconnect uafc on uafc.useraccountid = ppd.useraccountid
+	left join ods.useraccount ua on ua.useraccountid = ppd.useraccountid
+	left join reports.AntifraudFeedBack afb on afb.purchasepaymentdataid = fb.purchasepaymentdataid
+	where afb.purchasepaymentdataid is null
+group by fb.purchasepaymentdataid 
+		, ppd.useraccountid
+		, p.deviceinstallid
+ 		, uafc.facebookuserid
+ 		, ua.emailaddress
+ 		, ua.password;
+ 				
+--adyen
+insert into reports.AntifraudFeedBack (
+	typefeedback,
+	purchasepaymentdataid,
+	useraccountid,
+	deviceinstallid,
+	facebookuserid,
+	emailaddress,
+	password,
+	ddd,
+	telefone,
+	CPF,
+	IP,
+	cardnumber,
+	cardholdername,
+	expirationyear,
+	expirationmonth,
+	eventdate,
+	value,
+	cardtype
+) 
+select
+		  'Adyen' as typefeedback
+		, fb.purchasepaymentdataid 
+		, ppd.useraccountid
+ 		, p.deviceinstallid
+ 		, uafc.facebookuserid
+ 		, COALESCE(max((case 
+ 						when replace(regexp_substr(pah.datasend,'<UserEmail>[A-Za-z0-9.:/_%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]'),'<UserEmail>','') = '' then (replace(regexp_substr(pah.datasend,'<_document_ClearSale_Orders_Order_Email>[A-Za-z0-9.:/_%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]'),'<_document_ClearSale_Orders_Order_Email>',''))
+ 						else replace(regexp_substr(pah.datasend,'<UserEmail>[A-Za-z0-9.:/_%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]'),'<UserEmail>','')
+ 					end)),ua.emailaddress) emailaddress
+ 		, ua.password 
+		, max(case 
+				when left(replace(regexp_substr(pah.datasend,'<billingNumber>[A-Za-z0-9.:/-]*'),'<billingNumber>',''),2) <> '' then left(replace(regexp_substr(pah.datasend,'<billingNumber>[A-Za-z0-9.:/-]*'),'<billingNumber>',''),2)
+				when (replace(regexp_substr(pah.datasend,'<_document_ClearSale_Orders_Order_CollectionData_Phones_Phone_DDD>[A-Za-z0-9– . –]*'),'<_document_ClearSale_Orders_Order_CollectionData_Phones_Phone_DDD>','')) <> '' then (replace(regexp_substr(pah.datasend,'<_document_ClearSale_Orders_Order_CollectionData_Phones_Phone_DDD>[A-Za-z0-9– . –]*'),'<_document_ClearSale_Orders_Order_CollectionData_Phones_Phone_DDD>',''))
+				else left(replace(regexp_substr(pah.datasend,'<_document_RequestScore_Telephone>[A-Za-z0-9– . –]*'),'<_document_RequestScore_Telephone>',''),2) end 
+		  ) as DDD
+		, max(case
+				when right(replace(regexp_substr(pah.datasend,'<billingNumber>[A-Za-z0-9.:/-]*'),'<billingNumber>',''),9) <> '' then right(replace(regexp_substr(pah.datasend,'<billingNumber>[A-Za-z0-9.:/-]*'),'<billingNumber>',''),9) 
+				when (replace(regexp_substr(pah.datasend,'<_document_ClearSale_Orders_Order_CollectionData_Phones_Phone_Number>[A-Za-z0-9– . –]*'),'<_document_ClearSale_Orders_Order_CollectionData_Phones_Phone_Number>','')) <> '' then (replace(regexp_substr(pah.datasend,'<_document_ClearSale_Orders_Order_CollectionData_Phones_Phone_Number>[A-Za-z0-9– . –]*'),'<_document_ClearSale_Orders_Order_CollectionData_Phones_Phone_Number>',''))
+				else right(replace(regexp_substr(pah.datasend,'<_document_RequestScore_Telephone>[A-Za-z0-9– . –]*'),'<_document_RequestScore_Telephone>',''),9) end 
+		   ) as TELEFONE
+		, max(case
+				when replace(regexp_substr(pah.datasend,'<billingCPF>[A-Za-z0-9.:/-]*'),'<billingCPF>','') = '' then (replace(regexp_substr(pah.datasend,'<_document_ClearSale_Orders_Order_CollectionData_LegalDocument1>[A-Za-z0-9.:/-]*'),'<_document_ClearSale_Orders_Order_CollectionData_LegalDocument1>',''))
+				else replace(regexp_substr(pah.datasend,'<billingCPF>[A-Za-z0-9.:/-]*'),'<billingCPF>','') end
+		   ) as CPF
+		, max(case
+				when replace(regexp_substr(pah.datasend,'<ipAddress>[A-Za-z0-9.:/-]*'),'<ipAddress>','') = '' then (replace(regexp_substr(pah.datasend,'<_document_ClearSale_Orders_Order_IP>[A-Za-z0-9.:/-]*'),'<_document_ClearSale_Orders_Order_IP>',''))
+				else replace(regexp_substr(pah.datasend,'<ipAddress>[A-Za-z0-9.:/-]*'),'<ipAddress>','') end 
+		   ) as IP	
+		, max(replace(ppd.cardnumber,'"','')) as cardnumber
+		, max(ppd.cardholdername) as cardholdername
+		, max(ppd.expirationyear) as expirationyear
+		, max(ppd.expirationmonth) as expirationmonth
+		, max(fb.eventdate) eventdate
+		, max(fb.value) as value
+		, max(replace(fb.cardtype,'"','')) as cardtype
+from stage.adyencancelfeedback fb
+	inner join ods.purchasepaymentdata ppd on fb.purchasepaymentdataid = ppd.purchasepaymentdataid
+    left join paymentantifraudhistory_datasend pah on fb.purchasepaymentdataid = pah.purchasepaymentdataid
+	left join ods.purchase p on p.purchaseid = ppd.internalreferencenumber
+	left JOIN stage.useraccountfacebookconnect uafc on uafc.useraccountid = ppd.useraccountid
+	left join ods.useraccount ua on ua.useraccountid = ppd.useraccountid
+	left join reports.AntifraudFeedBack afb on afb.purchasepaymentdataid = fb.purchasepaymentdataid
+	where afb.purchasepaymentdataid is null
+group by fb.purchasepaymentdataid 
+		, ppd.useraccountid
+		, p.deviceinstallid
+ 		, uafc.facebookuserid
+ 		, ua.emailaddress
+ 		, ua.password;
+
+--cielo
+insert into reports.AntifraudFeedBack (
+	typefeedback,
+	purchasepaymentdataid,
+	useraccountid,
+	deviceinstallid,
+	facebookuserid,
+	emailaddress,
+	password,
+	ddd,
+	telefone,
+	CPF,
+	IP,
+	cardnumber,
+	cardholdername,
+	expirationyear,
+	expirationmonth,
+	eventdate,
+	value,
+	cardtype
+) 
+select
+		  'Cielo' as typefeedback
+		, fb.purchasepaymentdataid 
+		, ppd.useraccountid
+ 		, p.deviceinstallid
+ 		, uafc.facebookuserid
+ 		, COALESCE(max((case 
+ 						when replace(regexp_substr(pah.datasend,'<UserEmail>[A-Za-z0-9.:/_%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]'),'<UserEmail>','') = '' then (replace(regexp_substr(pah.datasend,'<_document_ClearSale_Orders_Order_Email>[A-Za-z0-9.:/_%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]'),'<_document_ClearSale_Orders_Order_Email>',''))
+ 						else replace(regexp_substr(pah.datasend,'<UserEmail>[A-Za-z0-9.:/_%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]'),'<UserEmail>','')
+ 					end)),ua.emailaddress) emailaddress
+ 		, ua.password 
+		, max(case 
+				when left(replace(regexp_substr(pah.datasend,'<billingNumber>[A-Za-z0-9.:/-]*'),'<billingNumber>',''),2) <> '' then left(replace(regexp_substr(pah.datasend,'<billingNumber>[A-Za-z0-9.:/-]*'),'<billingNumber>',''),2)
+				when (replace(regexp_substr(pah.datasend,'<_document_ClearSale_Orders_Order_CollectionData_Phones_Phone_DDD>[A-Za-z0-9– . –]*'),'<_document_ClearSale_Orders_Order_CollectionData_Phones_Phone_DDD>','')) <> '' then (replace(regexp_substr(pah.datasend,'<_document_ClearSale_Orders_Order_CollectionData_Phones_Phone_DDD>[A-Za-z0-9– . –]*'),'<_document_ClearSale_Orders_Order_CollectionData_Phones_Phone_DDD>',''))
+				else left(replace(regexp_substr(pah.datasend,'<_document_RequestScore_Telephone>[A-Za-z0-9– . –]*'),'<_document_RequestScore_Telephone>',''),2) end 
+		  ) as DDD
+		, max(case
+				when right(replace(regexp_substr(pah.datasend,'<billingNumber>[A-Za-z0-9.:/-]*'),'<billingNumber>',''),9) <> '' then right(replace(regexp_substr(pah.datasend,'<billingNumber>[A-Za-z0-9.:/-]*'),'<billingNumber>',''),9) 
+				when (replace(regexp_substr(pah.datasend,'<_document_ClearSale_Orders_Order_CollectionData_Phones_Phone_Number>[A-Za-z0-9– . –]*'),'<_document_ClearSale_Orders_Order_CollectionData_Phones_Phone_Number>','')) <> '' then (replace(regexp_substr(pah.datasend,'<_document_ClearSale_Orders_Order_CollectionData_Phones_Phone_Number>[A-Za-z0-9– . –]*'),'<_document_ClearSale_Orders_Order_CollectionData_Phones_Phone_Number>',''))
+				else right(replace(regexp_substr(pah.datasend,'<_document_RequestScore_Telephone>[A-Za-z0-9– . –]*'),'<_document_RequestScore_Telephone>',''),9) end 
+		   ) as TELEFONE
+		, max(case
+				when replace(regexp_substr(pah.datasend,'<billingCPF>[A-Za-z0-9.:/-]*'),'<billingCPF>','') = '' then (replace(regexp_substr(pah.datasend,'<_document_ClearSale_Orders_Order_CollectionData_LegalDocument1>[A-Za-z0-9.:/-]*'),'<_document_ClearSale_Orders_Order_CollectionData_LegalDocument1>',''))
+				else replace(regexp_substr(pah.datasend,'<billingCPF>[A-Za-z0-9.:/-]*'),'<billingCPF>','') end
+		   ) as CPF
+		, max(case
+				when replace(regexp_substr(pah.datasend,'<ipAddress>[A-Za-z0-9.:/-]*'),'<ipAddress>','') = '' then (replace(regexp_substr(pah.datasend,'<_document_ClearSale_Orders_Order_IP>[A-Za-z0-9.:/-]*'),'<_document_ClearSale_Orders_Order_IP>',''))
+				else replace(regexp_substr(pah.datasend,'<ipAddress>[A-Za-z0-9.:/-]*'),'<ipAddress>','') end 
+		   ) as IP		
+		, max(replace(ppd.cardnumber,'"','')) as cardnumber
+		, max(ppd.cardholdername) as cardholdername
+		, max(ppd.expirationyear) as expirationyear
+		, max(ppd.expirationmonth) as expirationmonth
+		, max(fb.transactiondate) as eventdate
+		, max(fb.value) as value
+		, max(replace(fb.cardtype,'"','')) as cardtype
+from stage.cielocancelfeedback fb
+	inner join ods.purchasepaymentdata ppd on fb.purchasepaymentdataid = ppd.purchasepaymentdataid
+    left join paymentantifraudhistory_datasend pah on fb.purchasepaymentdataid = pah.purchasepaymentdataid
+	left join ods.purchase p on p.purchaseid = ppd.internalreferencenumber
+	left JOIN stage.useraccountfacebookconnect uafc on uafc.useraccountid = ppd.useraccountid
+	left join ods.useraccount ua on ua.useraccountid = ppd.useraccountid
+	left join reports.AntifraudFeedBack afb on afb.purchasepaymentdataid = fb.purchasepaymentdataid
+	where afb.purchasepaymentdataid is null
+group by fb.purchasepaymentdataid 
+		, ppd.useraccountid
+		, p.deviceinstallid
+ 		, uafc.facebookuserid
+ 		, ua.emailaddress
+ 		, ua.password;
+ 		
+--Stone
+insert into reports.AntifraudFeedBack (
+	typefeedback,
+	purchasepaymentdataid,
+	useraccountid,
+	deviceinstallid,
+	facebookuserid,
+	emailaddress,
+	password,
+	ddd,
+	telefone,
+	CPF,
+	IP,
+	cardnumber,
+	cardholdername,
+	expirationyear,
+	expirationmonth,
+	eventdate,
+	value,
+	cardtype
+) 
+select
+		  'Stone' as typefeedback
+		, fb.purchasepaymentdataid 
+		, ppd.useraccountid
+ 		, p.deviceinstallid
+ 		, uafc.facebookuserid
+ 		, COALESCE(max((case 
+ 						when replace(regexp_substr(pah.datasend,'<UserEmail>[A-Za-z0-9.:/_%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]'),'<UserEmail>','') = '' then (replace(regexp_substr(pah.datasend,'<_document_ClearSale_Orders_Order_Email>[A-Za-z0-9.:/_%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]'),'<_document_ClearSale_Orders_Order_Email>',''))
+ 						else replace(regexp_substr(pah.datasend,'<UserEmail>[A-Za-z0-9.:/_%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]'),'<UserEmail>','')
+ 					end)),ua.emailaddress) emailaddress
+ 		, ua.password 
+		, max(case 
+				when left(replace(regexp_substr(pah.datasend,'<billingNumber>[A-Za-z0-9.:/-]*'),'<billingNumber>',''),2) <> '' then left(replace(regexp_substr(pah.datasend,'<billingNumber>[A-Za-z0-9.:/-]*'),'<billingNumber>',''),2)
+				when (replace(regexp_substr(pah.datasend,'<_document_ClearSale_Orders_Order_CollectionData_Phones_Phone_DDD>[A-Za-z0-9– . –]*'),'<_document_ClearSale_Orders_Order_CollectionData_Phones_Phone_DDD>','')) <> '' then (replace(regexp_substr(pah.datasend,'<_document_ClearSale_Orders_Order_CollectionData_Phones_Phone_DDD>[A-Za-z0-9– . –]*'),'<_document_ClearSale_Orders_Order_CollectionData_Phones_Phone_DDD>',''))
+				else left(replace(regexp_substr(pah.datasend,'<_document_RequestScore_Telephone>[A-Za-z0-9– . –]*'),'<_document_RequestScore_Telephone>',''),2) end 
+		  ) as DDD
+		, max(case
+				when right(replace(regexp_substr(pah.datasend,'<billingNumber>[A-Za-z0-9.:/-]*'),'<billingNumber>',''),9) <> '' then right(replace(regexp_substr(pah.datasend,'<billingNumber>[A-Za-z0-9.:/-]*'),'<billingNumber>',''),9) 
+				when (replace(regexp_substr(pah.datasend,'<_document_ClearSale_Orders_Order_CollectionData_Phones_Phone_Number>[A-Za-z0-9– . –]*'),'<_document_ClearSale_Orders_Order_CollectionData_Phones_Phone_Number>','')) <> '' then (replace(regexp_substr(pah.datasend,'<_document_ClearSale_Orders_Order_CollectionData_Phones_Phone_Number>[A-Za-z0-9– . –]*'),'<_document_ClearSale_Orders_Order_CollectionData_Phones_Phone_Number>',''))
+				else right(replace(regexp_substr(pah.datasend,'<_document_RequestScore_Telephone>[A-Za-z0-9– . –]*'),'<_document_RequestScore_Telephone>',''),9) end 
+		   ) as TELEFONE
+		, max(case
+				when replace(regexp_substr(pah.datasend,'<billingCPF>[A-Za-z0-9.:/-]*'),'<billingCPF>','') = '' then (replace(regexp_substr(pah.datasend,'<_document_ClearSale_Orders_Order_CollectionData_LegalDocument1>[A-Za-z0-9.:/-]*'),'<_document_ClearSale_Orders_Order_CollectionData_LegalDocument1>',''))
+				else replace(regexp_substr(pah.datasend,'<billingCPF>[A-Za-z0-9.:/-]*'),'<billingCPF>','') end
+		   ) as CPF
+		, max(case
+				when replace(regexp_substr(pah.datasend,'<ipAddress>[A-Za-z0-9.:/-]*'),'<ipAddress>','') = '' then (replace(regexp_substr(pah.datasend,'<_document_ClearSale_Orders_Order_IP>[A-Za-z0-9.:/-]*'),'<_document_ClearSale_Orders_Order_IP>',''))
+				else replace(regexp_substr(pah.datasend,'<ipAddress>[A-Za-z0-9.:/-]*'),'<ipAddress>','') end 
+		   ) as IP		
+		, max(replace(ppd.cardnumber,'"','')) as cardnumber
+		, max(ppd.cardholdername) as cardholdername
+		, max(ppd.expirationyear) as expirationyear
+		, max(ppd.expirationmonth) as expirationmonth
+		, max(COALESCE(fb.transactiondate, fb.incomingdate)) as eventdate
+		, max(fb.value) as value
+		, max(replace(fb.cardtype,'"','')) as cardtype
+from stage.stonecancelfeedback fb
+	inner join ods.purchasepaymentdata ppd on fb.purchasepaymentdataid = ppd.purchasepaymentdataid
+    left join paymentantifraudhistory_datasend pah on fb.purchasepaymentdataid = pah.purchasepaymentdataid
+	left join ods.purchase p on p.purchaseid = ppd.internalreferencenumber
+	left JOIN stage.useraccountfacebookconnect uafc on uafc.useraccountid = ppd.useraccountid
+	left join ods.useraccount ua on ua.useraccountid = ppd.useraccountid
+	left join reports.AntifraudFeedBack afb on afb.purchasepaymentdataid = fb.purchasepaymentdataid
+	where afb.purchasepaymentdataid is null
+group by fb.purchasepaymentdataid 
+		, ppd.useraccountid
+		, p.deviceinstallid
+ 		, uafc.facebookuserid
+ 		, ua.emailaddress
+ 		, ua.password;
+ 		
+ 		
+drop table if exists paymentantifraudhistory_datasend;

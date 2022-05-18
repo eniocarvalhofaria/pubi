@@ -1,0 +1,14 @@
+﻿		
+		delete from reports.VisitsAnalytics
+		where EventDate in (select distinct cast(EventDate as date) from reports.VisitsAnalytics_stage)
+		;
+		insert into reports.VisitsAnalytics
+		select				
+			cast(EventDate as date) EventDate
+		,	utmSource
+		,	utmMedium
+		,	deviceCategory
+		,	Visits
+		,	Account
+		,	Users
+		from reports.VisitsAnalytics_stage

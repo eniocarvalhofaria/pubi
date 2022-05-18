@@ -1,0 +1,1 @@
+﻿			(sale.PurchaseOrder = 1 and sale.salespageid not in (16,3000340,3000339) and sale.CategoryId not in (1,10))

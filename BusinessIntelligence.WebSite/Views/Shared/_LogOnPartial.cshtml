@@ -1,0 +1,6 @@
+﻿@if(Request.IsAuthenticated) {
+     @Html.ActionLink(@BusinessIntelligence.I18n.Messages.Logoff.ToUpper(), "LogOff", "Account") 
+}
+else {
+    @: @Html.ActionLink(@BusinessIntelligence.I18n.Messages.Logon.ToUpper(), "LogOn", "Account") 
+}

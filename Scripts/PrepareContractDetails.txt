@@ -1,0 +1,152 @@
+drop table if exists #contractDetails
+;
+
+CREATE TABLE #contractDetails
+(
+ 
+	 unidade_de_neg_cio VARCHAR(300)   
+	,distrito_conta VARCHAR(300)   
+	,op_cidade_conta VARCHAR(300)   
+	,op_bairro_conta VARCHAR(255)   
+	,condi_o_de_pagamento_oferta VARCHAR(500)   
+	,p_gina_de_publica_o_oferta VARCHAR(500)   
+	,op_id_conta_filial VARCHAR(255)   
+	,op_nome_conta_filial VARCHAR(255)   
+	,id_contrato VARCHAR(500)   
+	,contrato_pu INTEGER   
+	,tipo_site_oferta VARCHAR(500)   
+	,categoria_site_oferta VARCHAR(500)   
+	,subcategoria_site_oferta VARCHAR(500)   
+	,sub_subcategoria_site_oferta VARCHAR(500)   
+	,id_propriet_rio_final VARCHAR(300)   
+	,nome_propriet_rio_final VARCHAR(300)   
+	,id_propriet_rio_guarda_chuva VARCHAR(500)   
+	,nome_propriet_rio_guarda_chuva VARCHAR(500)   
+	,nome_da_opcao_texto VARCHAR(500)   
+	,nome_da_oferta_texto VARCHAR(65535)   
+	,op_t_tulo_da_op_o VARCHAR(65535)   
+	,op_descri_o_da_op_o VARCHAR(65535)   
+	,id_propriet_rio_grow_team VARCHAR(100)   
+	,nome_propriet_rio_grow_team VARCHAR(255)   
+	,projeto VARCHAR(65535)   ENCODE lzo
+	,origem_gteam VARCHAR(65535)   ENCODE lzo
+	,contrato_vinculado_a_adiantamento VARCHAR(65535)   ENCODE lzo
+	,op_quantidade_de_cupons DOUBLE PRECISION   
+)
+DISTSTYLE KEY
+DISTKEY (contrato_pu)
+SORTKEY (
+	 contrato_pu
+	)
+;
+
+insert into #contractdetails
+select 
+	case  
+	   when category in ('Beleza, Estética, Bem Estar e Saúde','Comércio e Serviços Locais','Entret. & Lazer','Gastronomia e Bares') then 'Local'  
+	   when category = 'Comércio e Serviços Online' then 'E-commerce'  
+	   when category = 'Viagem e Turismo' and ot.Team = 'Key Account (Turismo)' then 'Turismo - Agências'  
+	   when category = 'Viagem e Turismo' and ot.Team <> 'Key Account (Turismo)' then 'Turismo - Local'  
+	   else 'Outros'  
+	end Unidade_de_Neg_cio
+, ac.Distrito 
+, ac.Cidade_Nome_Texto 
+, ac.Bairro 
+,con.Condicao_de_pagamento 
+,con.Cidade_da_oferta 
+,Account 
+,sfac.Name
+,con.id
+,con.ContractId
+,Tipo_Site
+,Categoria_Site
+,Subcategoria_Site
+,null
+,funcid
+,funcName
+,userid
+,username
+,null
+,con.Description 
+,null
+,null
+,null
+,null
+,con.projeto
+,null
+,Con.contrato_vinculado_a_adiantamento
+,null
+
+from 
+(
+	select
+	
+		case
+   			when funcName is not null then funcName
+   			else username
+  		end ownerName
+  	,	c.*
+  	,	u.*
+  	,	func.*
+  	,	rc.Category
+	from
+	(
+		select
+			case
+	   			when Propriet_rio_compartilhado is not null 
+	   			and  trim(Propriet_rio_compartilhado) <> ''
+	   			then left(Propriet_rio_compartilhado, 15) 
+	   			else left(Propriet_rio_ID, 15)
+	  		end Proprietario 
+	  	,	cast(Name as int) ContractId
+	  	,	contrato_vinculado_a_adiantamento
+	  	,	Condicao_de_pagamento 
+		,	Cidade_da_oferta 
+		,	id
+		,	left(Propriet_rio_ID,15) truncProprietarioId
+		,	account
+		,	Tipo_Site
+		,	Categoria_Site
+		,	Subcategoria_Site
+		,	description
+		,	projeto
+		from salesforce.ctcontratopu 
+	) c
+	inner join reports.contract rc 
+	on rc.contractid = c.ContractId
+	left join 
+	(
+		select 
+			userid
+		,	left(userid, 15) truncUserId
+		,	userName
+		from reports."user" 
+	) u
+	 on c.truncProprietarioId = truncUserId
+	left join 
+	(
+		select 
+			id FuncId
+		,	left(id, 15) truncFuncId
+		,	name funcName
+		from salesforce.ctcadastro_de_funcion_rios
+	) func
+	on c.Proprietario = truncFuncId 
+) con
+
+left join reports.ownererp oe
+on con.ownerName = oe."owner"
+left join reports.ownerteam ot
+on ot.ownererp = oe.ownererp
+left join reports.team t
+on t.team = ot.team
+inner join salesforce.cfAccount ac (nolock) on ac.id = Account
+inner join salesforce.sfAccount sfac (nolock) on sfac.id = Account
+;
+
+delete from reports.contractdetails
+;
+insert into reports.contractdetails 
+select * from #contractdetails
+;
+

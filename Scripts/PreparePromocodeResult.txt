@@ -1,0 +1,160 @@
+delete from reports.PromocodeResult;
+insert into reports.PromocodeResult
+select
+	datepart(year,b.StartDate) StartYear
+,	datepart(month,b.StartDate) StartMonth
+,	b.Code
+,	b.StartDate
+,	b.EndDate
+,	p.RegionName
+,	p.PageType
+,	cast(PurchaseInitiated as date) UseDate
+,	datepart(day,PurchaseInitiated) UseDay
+,   datepart(year,PurchaseInitiated) UseYear
+,   datepart(month,PurchaseInitiated) UseMonth
+,	case
+		when cast(PurchaseInitiated as date) = dateadd(day,-1,cast(getdate() as date))
+		then 1
+		else 0
+	end IsLastDay
+,	case
+		when cast(PurchaseInitiated as date) > dateadd(day,-4,cast(getdate() as date))
+		then 1
+		else 0
+	end PutEmailBodyDay
+,	case
+		when ((datepart(year,PurchaseInitiated) * 12) + datepart(month,PurchaseInitiated)) + 1  >= ((datepart(year,getdate()) * 12) + datepart(month,getdate())) 
+		then 1
+		else 0
+	end PutEmailBodyMonth
+,	case
+		when promotiontype is not null and trim(replace(promotiontype,'"',''))  <> ''
+		then replace(promotiontype,'"','')
+		when substring(b.Code,1,1) = 'E' 
+		    or b.Code like 'NOVO%'
+			or b.Code like 'NIVER%'
+			or b.Code like 'SAUDADES%'
+		then 'Email'
+		when substring(b.Code,1,1) = 'F'
+		then 'Facebook'
+		when b.Code in('VF6965')
+		then 'Facebook'
+		when b.Code like '%pasteldefrango%'
+		then 'Baú'
+		when substring(b.Code,1,1) = 'A' 
+			or b.Code in('4991', '4992')
+		then 'Mobile'
+		when b.Code in('V9002','V6825','V6835')
+		then 'Remarketing'
+		when b.Code ilike 'smg%' then 'Saldo de cupons'
+		when b.Code ilike 'cine%' then 'Cinema'
+		when b.Code in('E7319') then 'Cinema'
+		when substring(b.Code,1,1) = 'M' then 'Marketing'
+		when substring(b.Code,1,1) = 'C' then 'Comercial'
+		when substring(b.Code,1,1) = 'V' 
+			or b.Code like 'TIMPEIXE%'
+			or b.Code like 'PEIXETIM%'
+		then 'Variados'
+		else 'Outros'
+    end PromocodeType
+,	case
+		when IsValueDiscount = 1
+		then 'Valor'
+		else 'Percentual'
+	end DiscountType
+,	case
+		when IsValueDiscount = 1
+		then cast(ValueDiscount as varchar(100))
+		else cast(PercentualDiscountValue as varchar(100)) + '%'
+	end PromocodeDiscount
+,	coalesce(publicdescription, 'Não informado') publicdescription
+,	case when firstPurchase = c.PurchaseId then 'Ativação' else 'Reativação' end Tipo
+,	case when validationclass is null 
+			and mobileonly=0 and categories is null 
+			and os is null and uidlist is null 
+			and isfacebookrequired is null 
+			and islimitperdevice is null 
+		then 'No Validation'
+		when validationclass is not null then replace(validationclass, 'PeixeUrbano.Promocode.Validation.Rules.','')
+		when isautomatic=1 then 'Automatic'
+		else 'Other' end promocoderule
+, 	isfacebookrequired 
+, 	case when categories is not null then 1 else 0 end category
+,	case 
+		when c.sourceid in (1,2,3) then 'Peixe Urbano'
+		when c.sourceid in (4,5,6) then 'Groupon'
+	end Site
+,	count(distinct c.UserAccountId) Buyers
+,	count(c.PurchaseId) Transactions
+,	sum(QTYSoldCoupons) QTYSoldCoupons
+,	sum(grosssales) GrossSales
+,	sum(a.discountvalue) PromocodeCost
+,	sum(grossrevenue) Grossrevenue
+from 
+(
+	select 
+		replace(code,'"','') code
+	,	promotionalcodeid
+	,	startdate
+	,	enddate
+	,	isvaluediscount
+	,	valuediscount
+	,	validationclass
+	,	percentualdiscountvalue
+	,	mobileonly
+	,	categories
+	,	os
+	,	uidlist
+	,	isfacebookrequired
+	,	islimit
+	,	islimitperdevice
+	,	islimitperaccount
+	,	isautomatic
+	,	channelid
+	,	promotiontype
+	from 
+	stage.PromotionalCode 
+) B
+left join
+	(
+	select 
+		pc.promotionalcodeid
+	,	min(c.publicdescription) publicdescription
+	from stage.PromotionalCode pc
+	inner join reports.appprod_campaign c
+	on c.promocode like '%' + pc.code + '%'
+	and sentdate between startdate and enddate
+	group by pc.promotionalcodeid
+	) k
+on b.promotionalcodeid = k.promotionalcodeid
+inner join stage.LogPromotionalCodeUse A
+on A.PromotionalCodeID=B.PromotionalCodeID
+inner join ods.sales C
+on A.PurchaseID = C.PurchaseID
+and c.Type = 1
+left join
+(
+	select 
+		pageid
+	,	case
+			when pagename like 'São Paulo%' then 'São Paulo'
+			else pagename
+		end RegionName
+	,	case
+			when  CityId in (50100013,3000340) then 'Nacional'
+			else  'Local'
+		end PageType
+	from ods.Page
+) p
+on c.salespageid = p.PageId
+inner Join ods.Discount D
+on C.DiscountID = D.DiscountID
+left join
+(select min(purchaseid) firstPurchase,useraccountid from ods.sales where type = 1 group by useraccountid) fp
+on c.useraccountid = fp.useraccountid
+where 
+b.StartDate >= '2013-01-01'
+and b.ChannelId in( 1,6)
+group by
+1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23
+

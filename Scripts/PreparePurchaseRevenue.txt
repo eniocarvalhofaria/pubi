@@ -1,0 +1,998 @@
+﻿drop table if exists #DPO;
+
+
+
+select 
+	purchaseid
+,	eventdate
+,	sum(((1 + case 
+			when eventdate < '2017-10-01' 
+			then 0.00043063353823 -- 1.3%
+			else 0.00026564093128 -- 0.8%
+		  end) ^ daystopayment) * amounttopartner ) - sum(amounttopartner)  TimeToPayEconomy
+,	sum(amounttopartner) amounttopartner
+
+
+into #DPO
+from 
+
+(
+
+
+select 
+	dr.purchaseid
+,	cast(coalesce(coalesce(AuthorizationDate,CuponCreationDate),PurchaseInitiated) as date) EventDate
+,	datediff(day,CreationDate,
+	cast(
+	case
+		when ud.PaymentCondition = 'NT00'
+		then
+			case
+				when datepart(day,FufillmentDate) between 1 and 15 
+				then dateadd(day,20 - datepart(day,FufillmentDate),FufillmentDate)
+				else dateadd(month,1,dateadd(day, (datepart(day,FufillmentDate) * -1) + 5,FufillmentDate))
+			end
+			
+		when ud.PaymentCondition = 'NT42'
+		then
+			case
+				when date_part(day,FufillmentDate) between 8 and 22 
+				then dateadd(day,cast(27 - date_part(day,FufillmentDate) as int),FufillmentDate)
+				when date_part(day,FufillmentDate) < 8 
+				then dateadd(day, cast((date_part(day,FufillmentDate) * -1) + 12 as int),FufillmentDate)
+				else dateadd(month,1,dateadd(day, cast((date_part(day,FufillmentDate) * -1) + 12 as int),FufillmentDate))
+			end
+		when ud.PaymentCondition = 'NT21' 
+		then dateadd(day,
+				case
+					when datepart(dw, FufillmentDate) = 7 
+					then 11
+					else (6 - datepart(dw, FufillmentDate)) + 5
+				end, FufillmentDate)
+	end as date)) DaysToPayment
+
+,	sum(dr.amounttopartner) AmountToPartner	
+from 
+(	
+	select 
+		purchaseid
+	,	coalesce(FufillmentDate,dateadd(day,avgtimeuse,getdate())) FufillmentDate
+	,	creationdate
+	from ods.Cupon 
+	inner join 
+	(
+		select
+		avg(datediff(day,c.creationdate,FufillmentDate)) avgtimeuse
+		from ods.Cupon c
+		where FufillmentDate between dateadd(day,-7,cast(getdate() as date)) and  dateadd(day,-1,cast(getdate() as date))
+	) m 
+	on 1= 1
+	where 
+		DateExpires < getdate()
+)c
+inner join ods.Sales dr
+on c.PurchaseID = dr.PurchaseID 
+and type = 1
+inner join ods.UnifiedDiscount ud
+on dr.Unifieddiscountid = ud.Unifieddiscountid
+and ud.PaymentCondition in ('NT21','NT00')
+
+
+group by 1,2,3
+	 	
+union all
+-- 1o pagamento
+select 
+	dr.purchaseid
+,	cast(coalesce(coalesce(AuthorizationDate,CuponCreationDate),PurchaseInitiated) as date) EventDate
+,	datediff(day,EventDate,dateadd(day,30,cast(ud.DiscountEnd as date))) DaysToPayment
+,	cast(sum(
+	case
+		when ud.PaymentCondition in ('NT01', 'NT05','NT09','NT10', 'NT15','NT16')
+		then pc.AssuredPercentage / 2
+		when ud.PaymentCondition in ('0030','NT11','NT12','NT13','NT14')
+		then pc.AssuredPercentage 
+	end * dr.AmountToPartner) as decimal(18,2)) AmountToPartner
+from ods.Sales dr
+left join ods.UnifiedDiscount ud
+on dr.Unifieddiscountid = ud.Unifieddiscountid
+inner join reports.PaymentCondition pc
+on ud.PaymentCondition = pc.PaymentCondition
+where  ud.DiscountEnd < dateadd(day,-2,getdate())
+and
+		pc.AssuredPercentage > 0
+	and 
+			(	
+				Description like 'Pagável em 30%' or
+				Description = '30 dias'
+			)
+group by 1,2,3
+
+
+union all
+
+
+select 
+	dr.purchaseid
+,	cast(coalesce(coalesce(AuthorizationDate,CuponCreationDate),PurchaseInitiated) as date) EventDate
+,	datediff(day,EventDate,dateadd(day,60,cast(ud.DiscountEnd as date))) DaysToPayment
+,	sum(
+	case
+		when pc.PaymentCondition in ('NT01','NT05','NT09','NT10', 'NT15','NT16')
+		then pc.AssuredPercentage / 2
+	end * dr.AmountToPartner) AmountToPartner
+
+from ods.Sales dr
+inner join ods.UnifiedDiscount ud
+on dr.Unifieddiscountid = ud.Unifieddiscountid
+inner join reports.PaymentCondition pc
+on ud.PaymentCondition = pc.PaymentCondition
+
+where  
+ud.DiscountEnd < dateadd(day,-1,getdate())
+and
+		pc.PaymentCondition in ('NT01','NT05','NT09','NT10', 'NT15','NT16')
+group by 1,2,3
+
+union all
+
+select 
+	dr.purchaseid
+,	cast(coalesce(coalesce(AuthorizationDate,CuponCreationDate),PurchaseInitiated) as date) EventDate
+,	datediff(day,EventDate,
+						dateadd(day,
+									case
+										when
+											datediff(day,
+														dateadd(day,
+																	case
+																		when ud.PaymentCondition = 'NT32'
+																		then 2
+																		when ud.PaymentCondition = 'NT33'
+																		then 10
+																		when ud.PaymentCondition = 'NT34'
+																		then 25
+																	end,
+																	ud.DiscountStart
+																), 
+														EventDate
+														) < 1 
+										then 0
+										else 
+											cast((
+													datediff(day,
+																dateadd(day,
+																			case
+																				when ud.PaymentCondition = 'NT32'
+																				then 2
+																				when ud.PaymentCondition = 'NT33'
+																				then 10
+																				when ud.PaymentCondition = 'NT34'
+																				then 25
+																			end,
+																			ud.DiscountStart
+																		), 
+																EventDate
+															) / 
+													case
+														when ud.PaymentCondition = 'NT32'
+														then 7
+														when ud.PaymentCondition = 'NT33'
+														then 15
+														when ud.PaymentCondition = 'NT34'
+														then 30
+													end
+													) as int) + 1
+									end *
+									case
+										when ud.PaymentCondition = 'NT32'
+										then 7
+										when ud.PaymentCondition = 'NT33'
+										then 15
+										when ud.PaymentCondition = 'NT34'
+										then 30
+									end, 
+									dateadd(day,
+												case
+													when ud.PaymentCondition = 'NT32'
+													then 7
+													when ud.PaymentCondition = 'NT33'
+													then 15
+													when ud.PaymentCondition = 'NT34'
+													then 30
+												end,
+												ud.DiscountStart
+											)
+								) 
+					) DaysToPayment
+,	sum(dr.AmountToPartner) AmountToPartner
+
+from ods.UnifiedDiscount ud
+inner join ods.Sales dr
+on dr.Unifieddiscountid = ud.Unifieddiscountid
+where  ud.DiscountStart >= '2013-05-01'
+and	ud.PaymentCondition in ('NT32','NT33','NT34')
+group by 
+1,2,3
+having sum(dr.AmountToPartner) > 0
+) a
+where amounttopartner > 0.0
+group by 1,2
+
+;
+drop table if exists #purchaseRevenueFees
+;
+	
+	
+	select
+	x.purchaseid purchaseid
+,	x.EventDate
+,	sum(x.aquirerfee) AquirerFee
+,	cast(0 as decimal(18,2)) AntifraudFee
+,	sum(((1 + 
+				case 
+					when eventdate < '2017-10-01' 
+					then 0.00043063353823 -- 1.3%
+					else 0.00026564093128 -- 0.8%
+		  		end) ^ ( x.numPayments * 30 /2))   * x.TotalValue ) - sum(x.totalvalue)  anticipationTax
+,	sum(x.unitvalue * x.quantity * d.ourcommission) * (case when x.EventDate < '2017-01-01' then 0.05 when x.EventDate < '2017-02-01' then 0.02 when udc.categoryid = 1 then 0.025 else 0.02 end + 0.0925)	 Taxes
+,	sum(x.totalvalue) submittedValue
+,	cast(0 as decimal(18,2)) extraFees
+,	cast(0 as decimal(18,2)) TimeToPayEconomy
+,	cast(0 as decimal(18,2)) extraFeesPU
+into #purchaseRevenueFees
+from reports.purchasepaymentdataaquirerfee x 
+left join reports.deals d
+on x.discountid = d.discountid
+left join reports.unifieddiscountcategory udc 
+on d.Unifieddiscountid = udc.Unifieddiscountid
+where eventdate between cast(dateadd(day,-30,getdate()) as date) and cast(dateadd(day,-1,getdate()) as date)
+group by 1,2,udc.categoryid
+;
+
+
+insert into #purchaseRevenueFees
+select
+	af.purchaseid purchaseid
+,	af.EventDate
+,	0 AquirerFee     
+,	sum(AntifraudFee) AntifraudFee
+,	0  anticipationTax
+,	0 Taxes				
+,	0 submittedValue
+,	0 extraFees
+,	0 TimeToPayEconomy
+,	0 extraFeesPU
+from reports.antifraudfee af
+where eventdate between cast(dateadd(day,-30,getdate()) as date) and cast(dateadd(day,-1,getdate()) as date)
+group by 1,2
+;
+insert into #purchaseRevenueFees
+select
+	x.purchaseid purchaseid
+,	x.EventDate
+,	0 AquirerFee
+,	0 AntifraudFee
+,	0 anticipationTax
+,	sum(coalesce(extraFeesPU,0) +  coalesce(financecharge,0)) * (case when x.EventDate < '2017-01-01' then 0.05 when x.EventDate < '2017-02-01' then 0.02 when udc.categoryid = 1 then 0.025 else 0.02 end + 0.0925)	 Taxes				
+,	0 submittedValue
+,	sum(extraFees) extraFees
+,	cast(0 as decimal(18,2)) TimeToPayEconomy
+,	sum(extraFeesPU) extraFeesPU
+from ods.sales x 
+inner join 
+(
+	select 
+		purchaseid
+	,	sum(quantityid * (
+			(shippingvalue * 	case when 	shippingcommission > 1 then 1 else coalesce(shippingcommission,0) end) + 
+			(issuingandboardingvalue *	case when 	issuingandboardingcommission > 1 then 1 else coalesce(issuingandboardingcommission,0) end) + 
+			(operationalcostvalue *	case when 	operationalcostcommission > 1 then 1 else coalesce(operationalcostcommission,0) end))
+		) extraFeesPU
+	,	sum(quantityid * (
+			(coalesce(shippingvalue,0) ) + 
+			(coalesce(issuingandboardingvalue,0)) + 
+			(coalesce(operationalcostvalue,0) ))
+		) extraFees
+	from ods.purchaselineitem
+	group by 1
+
+) pli
+on x.purchaseid = pli.purchaseid
+left join reports.deals d
+on x.discountid = d.discountid
+left join reports.unifieddiscountcategory udc 
+on d.Unifieddiscountid = udc.Unifieddiscountid
+where eventdate between cast(dateadd(day,-30,getdate()) as date) and cast(dateadd(day,-1,getdate()) as date)
+
+group by 1,2,udc.categoryid
+;
+
+insert into  #purchaseRevenueFees	 
+select
+	x.purchaseid 
+,	x.EventDate
+,	0 AquirerFee
+,	0 AntifraudFee
+,	0 anticipationTax
+,	0 Taxes				
+,	0 SubmittedValue
+,	0 shippingvalue
+,	TimeToPayEconomy
+,	0 extraFeesPU
+from #DPO x
+
+
+;
+
+drop table if exists #ChargebackAquirerPay
+;
+
+select  internalreferencenumber purchaseId
+into #ChargebackAquirerPay
+from ods.purchasepaymentdata
+where paymentstatusid = 12 and liabilityshift = true
+;
+drop table if exists #Cancellations
+;
+select
+	s.purchaseid
+,	cast(s.CancellationDate as date) EventDate
+,	cast(cast(sum(case
+			when (sl.purchasestatusid <> 1200 )  and s.AffectBilling = 1 
+			then s.CancelledPUCommission
+			else 0
+		end) as decimal(18,2))as numeric(38,2)) CancellationPreBillingPU
+,	cast(cast(sum(case
+			when  (sl.purchasestatusid <> 1200 ) and s.AffectBilling = 1 
+			then s.CancelledAmount
+			else 0
+		end) as decimal(18,2))as numeric(38,2)) CancellationPreBilling
+,	cast(cast(sum(case
+			when  (sl.purchasestatusid <> 1200 ) and s.AffectBilling = 0 and cast(s.CancellationDate as date) >= '2013-01-01' and  IsCancelledCouponPaidByPU = 0
+			then s.CancelledPUCommission
+			when  (sl.purchasestatusid <> 1200 ) and s.AffectBilling = 0 
+			then s.CancelledAmount
+			else 0
+		end) as decimal(18,2))as numeric(38,2)) CancellationPosBilling
+,	cast(cast(sum(case
+			when  (sl.purchasestatusid <> 1200 ) and s.AffectBilling = 0 
+			then s.CancelledPUCommission
+			else 0
+		end) as decimal(18,2))as numeric(38,2)) CancellationPosBillingPU		
+,	cast(cast(sum(case
+			when s.AffectBilling = 0 
+			then s.CancelledAmount
+		end) as decimal(18,2))as numeric(38,2)) CancellationPosTotalValue
+,	cast(cast(sum(case
+			when s.AffectBilling = 1 
+			then s.CancelledAmountToPartner
+			else 0
+		end) as decimal(18,2))as numeric(38,2)) CancelledAmountToPartner
+,	sum(s.AffectBilling) QTYCouponCancellationPreBilling
+,	sum(case
+			when s.AffectBilling = 0
+			then 1
+			else 0
+		end) QTYCouponCancellationPosBilling
+,	sum( case when (sl.purchasestatusid <> 1200 ) then  s.financecharge else 0 end) financecharge
+,	sum(case 
+			when chargebackrefundtypeid = 1 
+			then cast(
+					case
+						when s.AffectBilling = 0 and cast(s.CancellationDate as date) >= '2013-01-01' and  IsCancelledCouponPaidByPU = 0
+						then s.CancelledPUCommission
+						when s.AffectBilling = 0 
+						then s.CancelledAmount
+						when s.AffectBilling = 1
+						then s.CancelledPUCommission
+					end 
+					as decimal(18,2)) + s.financecharge
+			else 0 
+		end) CancellationRefundedToAquirer
+,	sum(case 
+			when sl.purchasestatusid = 12 and cap.PurchaseId is null
+			then cast(
+					case
+						when s.AffectBilling = 0 and cast(s.CancellationDate as date) >= '2013-01-01' and  IsCancelledCouponPaidByPU = 0
+						then s.CancelledPUCommission
+						when s.AffectBilling = 0 
+						then s.CancelledAmount
+						when s.AffectBilling = 1
+						then s.CancelledPUCommission
+					end 
+					as decimal(18,2)) + s.financecharge + (cast(coalesce(s.shippingvalue,0) +  coalesce(issuingandboardingvalue,0) + coalesce(operacionalcostvalue,0) as decimal(18,2)))
+			else 0 
+		end)Chargeback
+,	sum(case when (sl.purchasestatusid <> 1200 ) then cast(coalesce(s.shippingvalue,0) +  coalesce(issuingandboardingvalue,0) + coalesce(operacionalcostvalue,0) as decimal(18,2)) else 0 end) CancellationExtraFees
+,	sum(case when (sl.purchasestatusid <> 1200 ) then cast(coalesce(shippingcommission * s.shippingvalue,0) +  coalesce(issuingandboardingcommission * issuingandboardingvalue,0) + coalesce(operationalcostcommission * operacionalcostvalue,0) as decimal(18,2))  else 0 end) CancellationExtraFeesPU
+,	sum(s.promocodes) cancellationpromocodes
+,	sum(s.CancelledAmount) CancellationTotal
+,	sum(s.administrativefee) cancellationadministrativefee
+into #Cancellations
+from ods.Cancellations s
+left join reports.deals d
+on s.discountid = d.discountid
+left join (select purchaseid, min(chargebackrefundtypeid) chargebackrefundtypeid from ods.RefundChargeBack group by 1 ) r
+on s.purchaseid = r.purchaseid
+left join ods.sales sl
+on sl.purchaseid = s.purchaseid 
+left join #ChargebackAquirerPay cap 
+on cap.PurchaseId = s.purchaseid 
+where cast(s.CancellationDate as date) between cast(dateadd(day,-30,getdate()) as date) and cast(dateadd(day,-1,getdate()) as date)
+group by 	1,2
+
+
+;
+
+drop table if exists #administrativefeeuid 
+;
+
+  select
+ 	ud.Unifieddiscountid
+ ,	case 
+ 		when descontar_taxa_administrativa_sim_n_o = true
+ 		then 0 
+ 		else coalesce(valor_taxa_administrativa, 3) 
+ 	end administrativeFee 
+into  #administrativefeeuid 
+from ods.unifieddiscount ud
+inner join reports.sfcontract c
+on ud.contractid = c.contractid
+inner join salesforce.cfaccount acc 
+on c.accountid = acc.id
+;
+
+drop table if exists #purchasenoshow
+;
+select 
+	purchaseid
+,	noshowdate eventdate
+,	sum(noshowmanagerialvalue) noshowmanagerialvalue
+into  #purchasenoshow
+from reports.couponsnoshow
+group by 1,2
+;
+
+drop table if exists #revenue
+;
+
+select 
+	s.purchaseid
+,	cast(coalesce(coalesce(AuthorizationDate,CuponCreationDate),PurchaseInitiated) as date) EventDate
+,	GrossSales
+,	cast(case
+						when GrossRevenue > 0 
+						then GrossRevenue
+						else 0
+				   end as NUMERIC(34,10)) GrossSalesPUCommission
+,	cast(case
+						when AmountToPartner > 0 
+						then AmountToPartner
+						else 0
+				   end as NUMERIC(36,10)) AmountToPartner
+,	Promocodes Promocodes
+,	EconomizedValue EconomizedValue
+,	QTYSoldCoupons QTYCoupons
+,	qtyTransactions QTYTransactions
+,	coalesce(RefundCredits,0) + 
+		coalesce(PaidGiftCertificateCredits,0) +
+		coalesce(ReferralCredits,0) +
+		coalesce(PromotionCredits,0) +
+		coalesce(UnpaidGiftCertificateCredits,0) +
+		coalesce(MiscMarketingCredits,0) Credits
+,	coalesce(RefundCredits,0) + 
+		coalesce(PaidGiftCertificateCredits,0) 
+		 PaidCredits
+,	coalesce(ReferralCredits,0) +
+		coalesce(PromotionCredits,0) +
+		coalesce(UnpaidGiftCertificateCredits,0) +
+		coalesce(MiscMarketingCredits,0)
+		 UnpaidCredits
+,	FinanceCharge FinanceCharge
+,	case when B.PromotionalCodeID is null then promocodes else 0 end promocodesnoactivationrule
+,	case when cast(s.purchaseinitiated as date) >= '2017-10-01' then (administrativefee / 100.000) * s.grosssales else 0 end administrativefee
+into #revenue
+from ods.Sales s
+left join reports.purchaseUrl purl
+on s.purchaseid = purl.purchaseid
+left join reports.deals d
+on s.discountid = d.discountid
+left join  stage.LogPromotionalCodeUse A
+on A.PurchaseID = s.PurchaseID
+left join stage.PromotionalCode B
+on A.PromotionalCodeID = B.PromotionalCodeID
+and b.validationclass = 'PeixeUrbano.Promocode.Validation.Rules.Activation' 
+left join  #administrativefeeuid afu 
+on afu.Unifieddiscountid = s.Unifieddiscountid
+where 
+	s.Type = 1
+and cast(coalesce(coalesce(AuthorizationDate,CuponCreationDate),PurchaseInitiated) as date) between dateadd(day,-30,cast(getdate() as date)) and dateadd(day,-1,cast(getdate() as date))
+
+
+;
+
+drop table if exists #orders
+;
+select
+	pur.purchaseid
+,	cast(pur.purchaseinitiated as date) OrderDate
+,	(pur.unitvalue * pur.quantity) + coalesce(pli.extraFees,0) + coalesce(pur.financecharge,0) OrderTotalValue
+,	pur.unitvalue * pur.quantity OrderCouponsValue
+,	coalesce(pli.extraFees,0) OrderExtraFees
+,	coalesce(pur.financecharge,0) OrderFinanceCharge
+,	coalesce(a.discountvalue,0) OrderPromocodes
+,	coalesce(deb.OrderCredits,0) OrderCredits
+,	coalesce(pur.totalvalue,0) OrderValueToPay
+into #orders
+from ods.purchase pur
+left join ods.sales s
+on pur.purchaseid = s.purchaseid
+and type = 1
+left join 
+(
+	select PurchaseID, sum(Value) OrderCredits
+	from stage.Debit 
+	group by PurchaseID
+)deb 
+on pur.PurchaseID = deb.PurchaseID
+left join stage.LogPromotionalCodeUse A
+on a.PurchaseID = pur.PurchaseID
+left join 
+(
+	select 
+		purchaseid
+	,	sum(quantityid * (
+			(coalesce(shippingvalue,0) ) + 
+			(coalesce(issuingandboardingvalue,0)) + 
+			(coalesce(operationalcostvalue,0) ))
+		) extraFees
+	from ods.purchaselineitem
+	group by 1
+
+) pli
+on pur.purchaseid = pli.purchaseid
+where 
+	s.purchaseid is null
+;
+
+drop table if exists #ordersPurchaseattributtes
+;
+select 
+	pur.purchaseid
+,	pur.unifiedpurchaseid
+,	cast(pur.purchaseinitiated as date) orderdate
+,	upur.frontendid
+,	pur.discountid
+,	d.unifieddiscountid
+,	pur.regionid salespageid
+,	pur.purchaseruseraccountid  
+,	rank() over (partition by pur.purchaseruseraccountid order by pur.purchaseid) UserAccountOrderNumber
+,	case when s.purchaseid is not null then rank() over (partition by pur.purchaseruseraccountid order by s.purchaseid) else null end  UserAccountSaleNumber
+,	case when pur.sourceid in (4,5,6) then 6 else 1 end channelid
+into #ordersPurchaseattributtes
+from ods.purchase pur
+left join ods.discount d
+on d.discountid = pur.discountid
+left join ods.sales s 
+on pur.purchaseid = s.purchaseid
+and s.type = 1
+left join ods.unifiedpurchase upur 
+on pur.unifiedpurchaseid = upur.unifiedpurchaseid
+;
+
+drop table if exists #purchaserevenue
+;
+
+
+select
+	x.purchaseid
+,	opd.unifiedpurchaseid
+,	opd.frontendid
+,	opd.discountid
+,	opd.unifieddiscountid
+,	opd.salespageid
+,	opd.purchaseruseraccountid 
+,	opd.UserAccountOrderNumber
+,	opd.UserAccountSaleNumber
+,	opd.orderdate
+
+,	EventDate RevenueDate
+,	case when OrderTotalValue = 0 then GrossSales + FinanceCharge + ExtraFees else OrderTotalValue end    OrderTotalValue
+,	case when OrderCouponsValue = 0 then  GrossSales else OrderCouponsValue end OrderCouponsValue
+,	case when OrderExtraFees = 0 then  ExtraFees else OrderExtraFees end OrderExtraFees
+,	case when OrderFinanceCharge = 0 then  FinanceCharge else OrderFinanceCharge end OrderFinanceCharge
+,	case when OrderPromocodes = 0 then  Promocodes else OrderPromocodes end OrderPromocodes
+,	case when OrderCredits = 0 then  Credits else OrderCredits end OrderCredits
+,	case when OrderValueToPay = 0 then  SubmittedValue else OrderValueToPay end OrderValueToPay
+,	GrossSales + FinanceCharge + ExtraFees GMV
+,	GrossSales
+,	GrossSalesPUCommission
+,	NetSales
+,	AmountToPartner
+,	administrativefee
+,	GrossRevenue
+,	Promocodes
+,	EconomizedValue
+,	QTYSoldCoupons
+,	QTYTransactions
+,	Credits
+,	PaidCredits
+,	UnpaidCredits
+,  	NoShow
+,	FinanceCharge
+,	AquirerFee
+,	AntifraudFee
+,	anticipationCost
+,   	Taxes				
+,	ExtraFees
+,	promocodesnoactivationrule
+,	TimeToPayEconomy
+,	ExtraFeesPU
+,	Chargeback
+,	CancellationPreBillingPU
+,	CancellationPreBilling
+,	CancellationPosBilling
+,	CancellationPosBillingPU
+,	cancellationadministrativefee
+,	CancellationTotal
+,	CancellationPosTotalValue
+,	cancellationAmountToPartner
+,	CancellationfinanceCharge
+,	CancellationExtraFees
+,	CancellationExtraFeesPU
+,	cancellationpromocodes
+,	CancellationRefundedToAquirer
+,	QTYCouponCancellationPreBilling
+,	QTYCouponCancellationPosBilling
+,	opd.channelid
+
+
+into  #purchaserevenue
+from
+(
+select 
+	s.purchaseid
+,	EventDate
+,	sum(OrderTotalValue) OrderTotalValue
+,	sum(OrderCouponsValue) OrderCouponsValue
+,	sum(OrderExtraFees) OrderExtraFees
+,	sum(OrderFinanceCharge) OrderFinanceCharge
+,	sum(OrderPromocodes) OrderPromocodes
+,	sum(OrderCredits) OrderCredits
+,	sum(OrderValueToPay) OrderValueToPay
+,	sum(GrossSales) GrossSales
+,	sum(GrossSalesPUCommission) GrossSalesPUCommission
+,	sum(GrossSales - CancellationPreBilling) NetSales
+,	cast(cast(sum(
+		AmountToPartner  
+		) as decimal(18,2))as NUMERIC(36,10)) AmountToPartner
+,	cast(cast(sum(
+		coalesce(GrossSalesPUCommission,0) + coalesce(NoShow,0) + coalesce(FinanceCharge,0) + coalesce(ExtraFeesPU,0) + coalesce(AdministrativeFee,0)
+		) as decimal(18,2))as NUMERIC(36,10)) GrossRevenue
+,	sum(Promocodes) Promocodes
+,	SUM(EconomizedValue) EconomizedValue
+,	sum(QTYCoupons) QTYSoldCoupons
+,	sum(QTYTransactions) QTYTransactions
+,	sum(CancellationPreBillingPU) CancellationPreBillingPU
+,	sum(CancellationPreBilling) CancellationPreBilling
+,	sum(CancellationPosBilling) CancellationPosBilling
+,	sum(QTYCouponCancellationPreBilling) QTYCouponCancellationPreBilling
+,	sum(QTYCouponCancellationPosBilling) QTYCouponCancellationPosBilling
+,	sum(Credits) Credits
+,	sum(PaidCredits) PaidCredits
+,	sum(UnpaidCredits) UnpaidCredits
+,	sum(CancellationPosTotalValue) CancellationPosTotalValue
+,	sum(CancellationAmountToPartner) CancellationAmountToPartner
+,	sum(NoShow) NoShow
+,	sum(FinanceCharge) FinanceCharge
+,	sum(CancellationPosBillingPU) CancellationPosBillingPU
+,	sum(AquirerFee) AquirerFee
+,	sum(AntifraudFee) AntifraudFee
+,	sum(anticipationTax) anticipationCost
+,	sum(Taxes)	Taxes			
+,	sum(SubmittedValue) SubmittedValue
+,	sum(Shippingvalue) ExtraFees
+,	sum(promocodesnoactivationrule) promocodesnoactivationrule
+,	sum(TimeToPayEconomy) TimeToPayEconomy
+,	sum(ExtraFeesPU) ExtraFeesPU
+,	sum(CancellationfinanceCharge) CancellationfinanceCharge
+,	sum(CancellationRefundedToAquirer) CancellationRefundedToAquirer
+,	sum(Chargeback) Chargeback
+,	sum(CancellationExtraFees) CancellationExtraFees
+,	sum(CancellationExtraFeesPU) CancellationExtraFeesPU
+,	sum(cancellationpromocodes) cancellationpromocodes
+,	sum(CancellationTotal) CancellationTotal
+,	sum(administrativefee) administrativefee
+,	sum(cancellationadministrativefee) cancellationadministrativefee
+from 
+(
+
+select 
+	purchaseid
+,	EventDate
+,	0 OrderTotalValue
+,	0 OrderCouponsValue
+,	0 OrderExtraFees
+,	0 OrderFinanceCharge
+,	0 OrderPromocodes
+,	0 OrderCredits
+,	0 OrderValueToPay
+,	GrossSales
+,	GrossSalesPUCommission
+,	AmountToPartner
+,	Promocodes
+,	EconomizedValue
+,	QTYCoupons
+,	QTYTransactions
+,	cast(0.00 as NUMERIC(38,2)) CancellationPreBillingPU
+,	cast(0.00 as NUMERIC(38,2)) CancellationPreBilling
+,	cast(0.00 as NUMERIC(38,2))  CancellationPosBilling
+,	cast(0.00 as NUMERIC(38,2))  CancellationPosBillingPU
+,	cast(0.00 as NUMERIC(38,2))  CancellationPosTotalValue
+,	cast(0.00 as NUMERIC(38,2))  CancellationAmountToPartner
+,	Credits
+,	PaidCredits
+,	UnpaidCredits
+,	0 QTYCouponCancellationPreBilling
+,	0 QTYCouponCancellationPosBilling
+,	cast(0.00 as NUMERIC(38,6)) NoShow
+,	FinanceCharge
+,	0 AquirerFee
+,	0 AntifraudFee
+,	0 anticipationTax
+,	0 Taxes				
+,	0 SubmittedValue
+,	0 Shippingvalue
+,	promocodesnoactivationrule
+,	0 TimeToPayEconomy
+,	0 ExtraFeesPU
+,	0 CancellationfinanceCharge
+,	0 CancellationRefundedToAquirer
+,	0 Chargeback
+,	cast(0 as decimal(18,2)) CancellationExtraFees
+,	cast(0 as decimal(18,2)) CancellationExtraFeesPU
+,	cast(0 as decimal(18,2)) cancellationpromocodes
+,	cast(0 as decimal(18,2)) CancellationTotal
+,	administrativefee administrativefee
+,	cast(0 as decimal(18,2)) cancellationadministrativefee
+from #revenue
+
+union all
+
+
+select
+	purchaseid
+,	EventDate
+,	0 OrderTotalValue
+,	0 OrderCouponsValue
+,	0 OrderExtraFees
+,	0 OrderFinanceCharge
+,	0 OrderPromocodes
+,	0 OrderCredits
+,	0 OrderValueToPay
+,	0 GrossSales
+,	0 GrossSalesPUCommission
+,	0 AmountToPartner
+,	0 Promocodes
+,	0 EconomizedValue
+,	0 QTYCoupons
+,	0 QTYTransactions
+,	CancellationPreBillingPU
+,	CancellationPreBilling
+,	CancellationPosBilling
+,	CancellationPosBillingPU		
+,	CancellationPosTotalValue
+,	CancelledAmountToPartner
+,	0 Credits
+,	0 PaidCredits
+,	0 UnpaidCredits
+,	QTYCouponCancellationPreBilling
+,	QTYCouponCancellationPosBilling
+,	0 NoShow
+,	0 FinanceCharge
+,	0 AquirerFee
+,	0 AntifraudFee
+,	0 anticipationTax
+,	0 Taxes				
+,	0 SubmittedValue
+,	0 Shippingvalue
+,	0 promocodesnoactivationrule
+,	0 TimeToPayEconomy
+,	0 ExtraFeesPU
+,	financeCharge
+,	CancellationRefundedToAquirer
+,	Chargeback
+,	CancellationExtraFees
+,	CancellationExtraFeesPU
+,	cancellationpromocodes
+,	CancellationTotal
+,	0 administrativefee
+,	cancellationadministrativefee cancellationadministrativefee
+from #Cancellations
+
+
+union all
+
+
+select
+	purchaseid
+,	EventDate
+,	0 OrderTotalValue
+,	0 OrderCouponsValue
+,	0 OrderExtraFees
+,	0 OrderFinanceCharge
+,	0 OrderPromocodes
+,	0 OrderCredits
+,	0 OrderValueToPay
+,	0 GrossSales
+,	0 GrossSalesPUCommission
+,	0 AmountToPartner
+,	0 Promocodes
+,	0 EconomizedValue
+,	0 QTYCoupons
+,	0 QTYTransactions
+,	0 CancellationPreBillingPU
+,	0 CancellationPreBilling
+,	0 CancellationPosBilling
+,	0 CancellationPosBillingPU
+,	0 CancellationPosTotalValue
+,	0 CancelledAmountToPartner
+,	0 Credits
+,	0 PaidCredits
+,	0 UnpaidCredits
+,	0 QTYCouponCancellationPreBilling
+,	0 QTYCouponCancellationPosBilling
+,   sum(noshowmanagerialvalue) NoShow
+,	0 FinanceCharge
+,	0 AquirerFee
+,	0 AntifraudFee
+,	0 anticipationTax
+,   sum(noshowmanagerialvalue) * 0.0925  Taxes				
+,	0 SubmittedValue
+,	0 Shippingvalue
+,	0 promocodesnoactivationrule
+,	0 TimeToPayEconomy
+,	0 ExtraFeesPU
+,	0 CancellationfinanceCharge
+,	0 CancellationRefundedToAquirer
+,	0 Chargeback
+,	0 CancellationExtraFees
+,	0 CancellationExtraFeesPU
+,	0 cancellationpromocodes
+,	0 CancellationTotal
+,	0 administrativefee
+,	0 cancellationadministrativefee
+from #purchasenoshow s 
+where eventdate between dateadd(day,-30,cast(getdate() as date)) and dateadd(day,-1,cast(getdate() as date))
+
+group by 1,2
+
+
+union all
+select
+	purchaseid
+,	EventDate
+,	0 OrderTotalValue
+,	0 OrderCouponsValue
+,	0 OrderExtraFees
+,	0 OrderFinanceCharge
+,	0 OrderPromocodes
+,	0 OrderCredits
+,	0 OrderValueToPay
+,	0 GrossSales
+,	0 GrossSalesPUCommission
+,	0 AmountToPartner
+,	0 Promocodes
+,	0 EconomizedValue
+,	0 QTYCoupons
+,	0 QTYTransactions
+,	0 CancellationPreBillingPU
+,	0 CancellationPreBilling
+,	0 CancellationPosBilling
+,	0 CancellationPosBillingPU
+,	0 CancellationPosTotalValue
+,	0 CancelledAmountToPartner
+,	0 Credits
+,	0 PaidCredits
+,	0 UnpaidCredits
+,	0 QTYCouponCancellationPreBilling
+,	0 QTYCouponCancellationPosBilling
+,   0 NoShow
+,	0 FinanceCharge
+,	AquirerFee
+,	AntifraudFee
+,	anticipationTax
+,	Taxes				
+,	SubmittedValue
+,	ExtraFees
+,	0 promocodesnoactivationrule
+,	TimeToPayEconomy
+,	ExtraFeesPU
+,	0 CancellationfinanceCharge
+,	0 CancellationRefundedToAquirer
+,	0 Chargeback
+,	cast(0 as decimal(18,2)) CancellationExtraFees
+,	cast(0 as decimal(18,2)) CancellationExtraFeesPU
+,	cast(0 as decimal(18,2)) cancellationpromocodes
+,	cast(0 as decimal(18,2)) CancellationTotal
+,	0 administrativefee
+,	0 cancellationadministrativefee
+from  #purchaseRevenueFees
+where eventdate between dateadd(day,-30,cast(getdate() as date)) and dateadd(day,-1,cast(getdate() as date))
+union all 
+
+
+select
+	purchaseid
+,	OrderDate EventDate
+,	OrderTotalValue
+,	OrderCouponsValue
+,	OrderExtraFees
+,	OrderFinanceCharge
+,	OrderPromocodes
+,	OrderCredits
+,	OrderValueToPay
+,	0 GrossSales
+,	0 GrossSalesPUCommission
+,	0 AmountToPartner
+,	0 Promocodes
+,	0 EconomizedValue
+,	0 QTYCoupons
+,	0 QTYTransactions
+,	0 CancellationPreBillingPU
+,	0 CancellationPreBilling
+,	0 CancellationPosBilling
+,	0 CancellationPosBillingPU
+,	0 CancellationPosTotalValue
+,	0 CancelledAmountToPartner
+,	0 Credits
+,	0 PaidCredits
+,	0 UnpaidCredits
+,	0 QTYCouponCancellationPreBilling
+,	0 QTYCouponCancellationPosBilling
+,   0 NoShow
+,	0 FinanceCharge
+,	0 AquirerFee
+,	0 AntifraudFee
+,	0 anticipationTax
+,   0 Taxes				
+,	0 SubmittedValue
+,	0 Shippingvalue
+,	0 promocodesnoactivationrule
+,	0 TimeToPayEconomy
+,	0 ExtraFeesPU
+,	0 CancellationfinanceCharge
+,	0 CancellationRefundedToAquirer
+,	0 Chargeback
+,	0 CancellationExtraFees
+,	0 CancellationExtraFeesPU
+,	0 cancellationpromocodes
+,	0 CancellationTotal
+,	0 administrativefee
+,	0 cancellationadministrativefee
+from #orders s 
+where OrderDate between dateadd(day,-30,cast(getdate() as date)) and dateadd(day,-1,cast(getdate() as date))
+
+
+) s
+where eventdate between dateadd(day,-30,cast(getdate() as date)) and dateadd(day,-1,cast(getdate() as date))
+group by 	
+	s.purchaseid
+,	EventDate
+) x
+inner join #ordersPurchaseattributtes opd 
+on x.purchaseid = opd.purchaseid
+;
+--Select * into reports.PurchaseRevenue from #purchaserevenue;
+
+delete from reports.PurchaseRevenue
+where revenuedate between dateadd(day,-30,cast(getdate() as date)) and dateadd(day,-1,cast(getdate() as date))
+;
+
+--Select * into reports.PurchaseRevenue from #purchaserevenue;
+
+
+insert into reports.PurchaseRevenue
+Select * from #purchaserevenue
+;

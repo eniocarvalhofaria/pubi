@@ -1,0 +1,54 @@
+	drop table if exists #deals
+	;
+	
+	create table #deals
+	(
+		discountid INT
+	,	UnifiedDiscountID int 
+	,	buyingoptionnumericid int 
+	,	salesforcebuyingoptionid int 
+	,	salesforceofferid int
+	,	dealnumericid int
+	,	ourcommission decimal (18,4)
+	,	salesforcecontractid int
+	) distkey (discountid) sortkey(discountid)
+	 
+	;
+	
+	insert into #deals 
+	select distinct
+		d.DiscountId
+	,	d.UnifiedDiscountID
+	,	buying_option_numeric_id buyingoptionnumericid
+	,	d.idopcaodecompra salesforcebuyingoptionid
+	,	sfbo.offerid salesforceofferid
+	,	dl.deal_numeric_id dealnumericid
+	,	d.ourcommission
+	,	ud.contractid
+	from ods.discount d 
+	
+	inner join 
+	(
+		select coalesce(max(discountid),0) maxd 
+		from reports.deals 
+		where dealnumericid is not null and salesforcebuyingoptionid is not null
+	) m 
+	on d.discountid > maxd 
+	left join (select legacydata_unified_discount_id, max(deal_numeric_id) deal_numeric_id from ods.mng_deals_latest group by 1) dl
+	on d.unifieddiscountid = dl.legacydata_unified_discount_id
+	left join ods.mng_deals_latest_buying_options mngbo
+	on dl.deal_numeric_id = mngbo.deal_numeric_id 
+	and	mngbo.buying_option_id = d.buyingoptionid
+	left join ods.unifieddiscount ud 
+	on ud.unifieddiscountid = d.unifieddiscountid
+	left join reports.sfbuyingoption sfbo 
+	on sfbo.buyingoptionid = d.idopcaodecompra
+	;
+	
+	delete from reports.deals 
+	where discountid in 
+	(select discountid from #deals )
+	;
+	insert into reports.deals 
+	select * from #deals
+	;

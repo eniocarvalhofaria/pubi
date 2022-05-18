@@ -1,0 +1,7 @@
+﻿	inner join (select distinct yearmonth from #ltvUsersAnalysis) x
+	on sale.yearmonth = x.yearmonth
+	left join (select distinct UserAccountId from #ltvUsersAnalysis) uA
+	on sale.UserAccountId = uA.UserAccountID
+	where
+	uA.UserAccountID is null
+	and

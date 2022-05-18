@@ -1,0 +1,44 @@
+
+drop table if exists #neighborhoodRevenue
+;
+select
+	gs.countryregionname
+,	gs.statename
+,	coalesce(gc.stateregionname, 'Não identificada') stateregionname
+,	gc.cityname
+,	coalesce(gn.cityregionname, 'Não identificada') cityregionname
+,	gn.neighborhoodname
+,	dl.account_name
+,	dl.account_account_id
+,	dr.EventMonth
+,	sum(grosssales) grosssales
+into #neighborhoodRevenue
+from reports.buyingoptionpostalcode bopc 
+inner join 
+	(
+	select 
+		buyingoptionnumericid
+	,	cast(eventdate as char(7)) EventMonth
+	,	sum(grosssales) grossSales
+	from reports.discountrevenue
+	where eventdate >= '2017-01-01'
+	group by 1,2
+	) dr
+on dr.buyingoptionnumericid = bopc.buyingoptionnumericid
+left join ods.mng_deals_latest_buying_options dl 
+on dl.buying_option_numeric_id = bopc.buyingoptionnumericid
+left join reports.geoaddress ga 
+on bopc.addresspostalcode = ga.addresspostalcode
+left join reports.geoneighborhood gn 
+on ga.neighborhoodid = gn.neighborhoodid 
+left join reports.geocity gc 
+on gn.cityid = gc.cityid 
+left join reports.geostate gs 
+on gc.stateid = gs.stateid
+group by 1,2,3,4,5,6,7,8,9
+
+;
+delete from  reports.neighborhoodRevenue 
+;
+insert into reports.neighborhoodRevenue 
+select * from #neighborhoodRevenue

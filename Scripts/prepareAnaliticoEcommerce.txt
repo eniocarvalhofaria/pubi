@@ -1,0 +1,584 @@
+drop table if exists qtyseismeses;
+create temporary table qtyseismeses (
+	dt date,
+	nome_da_oferta_texto varchar(max),
+	nome_da_opcao_texto varchar(13),
+	QtyCoupons int
+)
+diststyle key
+distkey(nome_da_oferta_texto)
+sortkey(nome_da_oferta_texto, nome_da_opcao_texto, dt);
+
+insert into qtyseismeses
+select
+	cast(cast(date_part('year', eventdate) as varchar(4)) + '-' + cast(date_part('month', eventdate) as varchar(2)) + '-01' as date) dt,
+	ud.idoferta Nome_da_Oferta_Texto,
+	d.idopcaodecompra Nome_da_Opcao_Texto,
+	sum(dr.QTYCoupons) QTYCoupons
+from reports.DiscountRevenue dr
+left join ods.discount d
+	on d.discountid = dr.discountid
+left join ods.UnifiedDiscount ud
+	on ud.UnifiedDiscountId = dr.UnifiedDiscountId
+where 1=1  
+	and dr.eventdate between cast(cast(date_part('year', dateadd(month, -3,case when date_part(day, getdate()) = 1 then getdate()-1 else getdate() end)) as varchar) + '-' + right('00' + cast(date_part('month', dateadd(month, -3, case when date_part(day, getdate()) = 1 then getdate()-1 else getdate() end)) as varchar), 2) + '-01' as date)	and 
+	to_char(dateadd(day, -1, cast(cast(date_part('YEAR', dateadd(month, -1, case when date_part(day, getdate()) = 1 then getdate()-1 else getdate() end)) as char(4)) + '-' + right('00' + cast(date_part('MONTH', dateadd(month, 1, dateadd(month, -1, case when date_part(day, getdate()) = 1 then getdate()-1 else getdate() end)))as char(2)), 2) +'-01' as date)), 'YYYY-MM-DD')
+	and (dr.grossrevenue <> 0 or dr.CancelledPreBillingPU <> 0 or dr.CancelledPosBillingPU <> 0 or dr.NoShow <> 0)
+	and d.discountcategoryid = 4
+group by
+	cast(cast(date_part('year', eventdate) as varchar(4)) + '-' + cast(date_part('month', eventdate) as varchar(2)) + '-01' as date),
+	ud.idoferta,
+	d.idopcaodecompra;
+	
+analyze qtyseismeses;	
+	
+	
+drop table if exists qtymenostrintadias;
+create temporary table qtymenostrintadias (
+	nome_da_oferta_texto varchar(max),
+	nome_da_opcao_texto varchar(13),
+	qtymenostrintadias int
+)
+diststyle key
+distkey(nome_da_oferta_texto)
+sortkey(nome_da_oferta_texto, nome_da_opcao_texto);
+
+insert into qtymenostrintadias
+select 
+	ud.idoferta Nome_da_Oferta_Texto,
+	d.idopcaodecompra Nome_da_Opcao_Texto,
+	sum(dr.qtycoupons) qtymenostrintadias
+from reports.discountrevenue dr
+left join ods.discount d
+	on d.discountid = dr.discountid
+left join ods.UnifiedDiscount ud
+	on ud.UnifiedDiscountId = dr.UnifiedDiscountId
+where 1=1
+	and trunc(dr.eventdate) >= getdate()-30 
+	and d.discountcategoryid = 4
+group by 
+	ud.idoferta, 
+	d.idopcaodecompra;
+	
+analyze qtymenostrintadias;
+	
+drop table if exists drfiltrada;
+create temporary table drfiltrada (
+	discountid int,
+	unifieddiscountid int,
+	eventdate date,
+	GrossSales decimal(12,2),
+	GrossRevenue decimal(12,2),
+	GrossSalesPUCommission decimal(12,2),
+	CancelledPreBillingPU decimal(12,2),
+	CancelledPosBillingPU decimal(12,2),
+	noshow decimal(12,2),
+	QTYCoupons int,
+	extrafees decimal(12,2),
+	extrafeespu decimal(12,2),
+	financecharge decimal(12,2),
+	aquirerfee decimal(12,2),
+	antifraudfee decimal(12,2),
+	anticipationcost decimal(12,2),
+	promocodes decimal(12,2),
+	rol decimal(12,2),
+	grossprofit decimal(12,2),
+	gmv decimal(12,2)
+)
+diststyle key
+distkey(discountid);
+
+insert into drfiltrada
+select
+	discountid,
+	unifieddiscountid,
+	eventdate,
+	sum(GrossSales) GrossSales,
+	sum(GrossRevenue) GrossRevenue,
+	sum(GrossSalesPUCommission) GrossSalesPUCommission,
+	sum(CancelledPreBillingPU) CancelledPreBillingPU,
+	sum(CancelledPosBillingPU) CancelledPosBillingPU,
+	sum(noshow) noshow,
+	sum(QTYCoupons) QTYCoupons,
+	sum(extrafees) extrafees,
+	sum(extrafeespu) extrafees,
+	sum(financecharge) financecharge,
+	sum(aquirerfee) aquirerfee,
+	sum(antifraudfee) antifraudfee,
+	sum(anticipationcost) anticipationcost,
+	sum(promocodes) promocodes,  
+	sum(operationalnetrevenue) rol,
+	sum(grossprofit) grossprofit,
+	sum(gmv) gmv
+	from reports.vw_discountrevenue
+where 1=1
+and eventdate between cast(cast(date_part('year', case when date_part(day, getdate()) = 1 then getdate()-1 else getdate() end) as varchar) + '-' + right('00' + cast(date_part('month', case when date_part(day, getdate()) = 1 then getdate()-1 else getdate() end) as varchar), 2) + '-01' as date) and trunc(case when date_part(day, getdate()) = 1 then getdate()-1 else getdate() end)
+group by 
+	discountid,
+	unifieddiscountid,
+	eventdate;
+--cast(cast(date_part('year', dateadd(month, -1,getdate())) as varchar) + '-' + right('00' + cast(date_part('month', dateadd(month, -1,getdate())) as varchar), 2) + '-01' as date) and trunc(getdate());
+
+analyze drfiltrada;
+
+drop table if exists opOnline;
+create temporary table opOnline (
+	--legacydata_unified_discount_id int,
+	idoferta int,
+	contract_number int,
+	account_account_id varchar(max),
+	canonical_url varchar(max),
+	idopcaodecompra int,
+	available_units int,
+	soldCupons int,
+	publishing_date date,
+	deal_id varchar(max)
+)
+diststyle key
+distkey(idopcaodecompra)
+sortkey(idoferta, idopcaodecompra);
+			
+insert into opOnline	
+select 
+	--dl.legacydata_unified_discount_id,
+	dl.idoferta,
+	cast(dl.contract_number as int) contract_number,
+	dl.account_account_id,
+	dl.canonical_url,
+	bo.idopcaodecompra,
+	bo.available_units,
+	isnull(T.SoldCupons,0) soldCupons,
+	trunc(dl.publishing_date) publishing_date,
+	bo.deal_id
+		from ods.mng_deals_latest dl
+			left join ods.mng_deals_latest_buying_options bo
+				on dl.deal_numeric_id = bo.deal_numeric_id
+			left join (select 
+						d.unifieddiscountid, 
+						c.buyingoptionid, 
+						count(*) SoldCupons 
+							from ods.cupon c
+								inner join ods.discount d 
+									on c.discountid = d.discountid
+						group by
+							d.unifieddiscountid,
+							c.buyingoptionid) as T 
+				on T.buyingoptionid = bo.buying_option_id 
+				and T.unifieddiscountid = dl.legacydata_unified_discount_id
+			left join salesforce.ctop_es_de_compra op
+				on op.id = bo.salesforce_id
+where 1=1
+and dl.publishing_date < getdate() 
+and dl.expiration_date >=  getdate() 
+and dl.public = 1
+and dl.sold_out = 'false'
+and bo.active = 1
+and isnull(op.op_data_hora_de_sa_da, getdate()) >= getdate();
+
+analyze opOnline;
+
+
+drop table if exists venda;
+create temporary table venda (
+	SalesExecutive varchar(max),
+	CategoryName varchar(max),
+	SubcategoryName varchar(max),
+	ContractID int,
+	Nome_Parceiro varchar(max),
+	Sugestao_de_manchete varchar(max),
+	Titulo_Opcao_Compra varchar(max),
+	marca varchar(max),
+	preco_original decimal(12,2),
+	preco_com_desconto decimal(12,2),
+	status_de_opativa int,
+	codigo_ean varchar(max),
+	cupons_vendidos_pedido int,
+	cupons_disponiveis int,
+	Description varchar(max),
+	Nome_da_Oferta_Texto varchar(13),
+	Nome_da_Opcao_Texto varchar(13),
+	Link varchar(max), 
+	Rol decimal(12,2),
+	cancelamento_pre decimal(12,2),
+	cancelamento_pos decimal(12,2),
+	noshow decimal(12,2),
+	VB decimal(12,2),
+	RB decimal(12,2),
+	QTYCoupons int,
+	qtymenostrintadias int,
+	status_de_ofativa int,
+	Taxa_Extra decimal(12,2),
+	Taxa_ExtraPU decimal(12,2),
+	eventdate date,
+	financecharge decimal(12,2),
+	publishing_date date,
+	deal_id varchar(max),
+	data_source int,
+	Lucro_bruto_realizado decimal(12,2),
+	gmv decimal(12,2)
+)
+diststyle key
+distkey(Nome_da_Opcao_Texto)
+sortkey(Nome_da_Oferta_Texto, Nome_da_Opcao_Texto);
+
+insert into venda
+select
+	ot_of.ownererp SalesExecutive,
+	case 
+		when len(op.Categoria_Site_Oferta) > 1 and op.Categoria_Site_Oferta is not null then op.Categoria_Site_Oferta
+		when len(offer.of_categoria_site) > 1 and offer.of_categoria_site is not null then offer.of_categoria_site
+		else contratoPU.categoria_site 
+	end CategoryName,
+	case 
+		when len(op.Subcategoria_Site_Oferta) > 1 and op.Subcategoria_Site_Oferta is not null then op.Subcategoria_Site_Oferta
+		when len(offer.of_subcategoria_site) > 1 and offer.of_subcategoria_site is not null then offer.of_subcategoria_site
+		else contratoPU.subcategoria_site
+	end SubcategoryName,
+	ud.contractid ContractID,
+	ac.accountname Nome_Parceiro,
+	offer.sugest_o_de_manchete Sugestao_de_manchete,
+	op.op_t_tulo_da_op_o Titulo_Opcao_Compra,
+	op.marca,
+	op.op_pre_o_original "preco_original",
+	op.op_pre_o_final "preco_com_desconto",
+	case when len(dll.idopcaodecompra) > 1 and dll.idopcaodecompra is not null then 1
+		else 0 end "status_de_opativa",
+	--0 "status_sem_venda",
+	case when len(op.c_digo_ean) > 1 and op.c_digo_ean is not null then op.c_digo_ean
+		else 'N/A' end "codigo_ean",
+	isnull(dll.soldCupons, 0) "cupons_vendidos_pedido",
+	isnull(dll.available_units, 0) "cupons_disponiveis",
+	cast(contratoPU.description as varchar(255)) Description,
+	offer.name Nome_da_Oferta_Texto,
+	op.name Nome_da_Opcao_Texto,
+	dll.canonical_url Link, 
+	cast(sum(coalesce(dr.rol, 0)) as decimal(12,2)) Rol,
+	cast(sum(coalesce(dr.cancelledprebillingpu, 0)) as decimal(12,2)) "cancelamento_pre",
+	cast(sum(coalesce(dr.cancelledposbillingpu, 0)) as decimal(12,2)) "cancelamento_pos",
+	cast(sum(coalesce(dr.noshow, 0)) as decimal(12,2)) "noshow",
+	cast(sum(coalesce(dr.GrossSales, 0)) as decimal(12,2)) VB,
+	cast(sum(coalesce(dr.GrossSalesPUCommission, 0)) as decimal(12,2)) RB,
+	sum(QTYCoupons) QTYCoupons,
+	coalesce(qty.qtymenostrintadias, 0) qtymenostrintadias,
+	case when len(dll.idoferta) > 1 and dll.idoferta is not null then 1
+		else 0 end "status_de_ofativa",
+	sum(dr.extrafees) "Taxa_Extra",
+	sum(dr.extrafeespu) "Taxa_ExtraPU",
+	trunc(dr.eventdate) eventdate,
+	sum(dr.financecharge) financecharge,
+	dll.publishing_date,
+	dll.deal_id,
+	1 data_source,
+	cast(sum(coalesce(dr.grossprofit, 0)) as decimal(12,2)) "Lucro_bruto_realizado",
+	cast(sum(coalesce(dr.gmv, 0)) as decimal(12,2)) "gmv"
+from drfiltrada dr
+left join ods.discount d
+	on d.discountid = dr.discountid
+left join ods.UnifiedDiscount ud
+	on ud.UnifiedDiscountId = dr.UnifiedDiscountId
+left join opOnline dll 
+	on dll.idoferta = ud.idoferta
+	and dll.idopcaodecompra = d.idopcaodecompra
+left join qtymenostrintadias qty
+	on qty.Nome_da_Oferta_Texto = ud.idoferta
+	and qty.Nome_da_Opcao_Texto = d.idopcaodecompra
+left join salesforce.ctop_es_de_compra op
+	on op.c_digo_opcao_n_merico = d.idopcaodecompra
+left join salesforce.ctOfertas offer
+	on offer.c_digo_oferta_num_rico = ud.Idoferta
+left join salesforce.ctcontratopu contratoPU
+	on contractid = right(contratoPU.Name, 6)
+left join reports.account ac
+	on contratoPU.account = ac.accountid
+--OF
+left join reports.sfofferhistory_owner sfofferh
+	on sfofferh.parentid = offer.id
+	and dr.eventdate between sfofferh.startdate and sfofferh.enddate
+left join salesforce.ctCadastro_de_Funcion_rios func_of
+	on left(sfofferh.sfownerid, 15) = left(func_of.Id, 15)
+left join reports.OwnerERP ownerE_of
+	on Upper(func_of.Name) = Upper(ownerE_of."Owner")
+left join reports.OwnerTeam ot_of
+	on Upper(ownerE_of.OwnerERP) = Upper(ot_of.OwnerERP)
+where 1=1
+	and d.discountcategoryid = 4
+	and ot_of.Team = 'Key Account (E-commerce)' 
+	--and op.name = 'OP-0000312428'
+	--and dr.eventdate between '2017-02-01' and '2017-02-01'
+group by
+	ot_of.ownererp,	
+	case 
+		when len(op.Categoria_Site_Oferta) > 1 and op.Categoria_Site_Oferta is not null then op.Categoria_Site_Oferta
+		when len(offer.of_categoria_site) > 1 and offer.of_categoria_site is not null then offer.of_categoria_site
+		else contratoPU.categoria_site
+	end,
+	case 
+		when len(op.Subcategoria_Site_Oferta) > 1 and op.Subcategoria_Site_Oferta is not null then op.Subcategoria_Site_Oferta
+		when len(offer.of_subcategoria_site) > 1 and offer.of_subcategoria_site is not null then offer.of_subcategoria_site
+		else contratoPU.subcategoria_site
+	end,			
+	case when len(dll.idopcaodecompra) > 1 and dll.idopcaodecompra is not null then 1
+		else 0 end,
+	case when len(op.c_digo_ean) > 1 and op.c_digo_ean is not null then op.c_digo_ean
+		else 'N/A' end,
+	ac.accountname,
+	ud.contractid,
+	offer.sugest_o_de_manchete,
+	op.op_t_tulo_da_op_o,
+	op.marca,
+	op.op_pre_o_original,
+	op.op_pre_o_final,
+	dll.soldCupons,
+	dll.available_units,
+	cast(contratoPU.description as varchar(255)),
+	offer.name,
+	op.name,
+	dll.canonical_url,
+	coalesce(qty.qtymenostrintadias, 0),
+	case when len(dll.idoferta) > 1 and dll.idoferta is not null then 1 else 0 end,
+	trunc(dr.eventdate),
+	dll.publishing_date,
+	dll.deal_id;
+	
+analyze venda;	 
+
+delete from reports.analiticoEcommerce
+where 1=1
+and (eventdate between cast(cast(date_part('year', case when date_part(day, getdate()) = 1 then getdate()-1 else getdate() end) as varchar) + '-' + right('00' + cast(date_part('month', case when date_part(day, getdate()) = 1 then getdate()-1 else getdate() end) as varchar), 2) + '-01' as date) and case when date_part(day, getdate()) = 1 then getdate()-1 else getdate() end
+or data_source = 2
+--- Mudado 5 por 12, para aumentar para 1 ano o conteudo da tabela
+or eventdate <= cast(cast(date_part('year', dateadd(month, -12,case when date_part(day, getdate()) = 1 then getdate()-1 else getdate() end)) as varchar) + '-' + right('00' + cast(date_part('month', dateadd(month, -12, case when date_part(day, getdate()) = 1 then getdate()-1 else getdate() end)) as varchar), 2) + '-01' as date));
+
+
+/*delete from reports.analiticoecommerce
+where 1=1
+and eventdate <= cast(cast(date_part('year', dateadd(month, -5,getdate())) as varchar) + '-' + right('00' + cast(date_part('month', dateadd(month, -5, getdate())) as varchar), 2) + '-01' as date);
+*/
+
+insert into reports.analiticoEcommerce
+select
+	--tb1.ano,
+	--tb1.mes,
+	UPPER(SalesExecutive) SalesExecutive,
+	CategoryName NewCategory,
+	SubcategoryName NewSubcategory,
+	ContractID,
+	Nome_Parceiro,
+	Sugestao_de_manchete,
+	Titulo_Opcao_Compra,
+	Marca,
+	preco_original,
+	preco_com_desconto,
+	status_de_opativa,
+	codigo_ean,
+	Description,
+	regexp_replace(tb1.Nome_da_Oferta_Texto, '\r|\n|\t','g') "OF",
+	regexp_replace(tb1.Nome_da_Opcao_Texto, '\r|\n|\t','g') "OP",
+	Link,
+	Rol,
+	VB,
+	RB,
+	cancelamento_pre,
+	cancelamento_pos,
+	noshow,
+	tb1.QTYCoupons,
+	cupons_disponiveis,
+	cupons_vendidos_pedido,
+	cupons_disponiveis-cupons_vendidos_pedido Cupons_Remanecentes_Pedido,
+	case 
+		when tb1.QTYCoupons = 0 or cupons_vendidos_pedido = 0 then 0
+		else tb1.QTYCoupons/cast(cupons_vendidos_pedido as decimal(12,2)) end "Aprovacao",
+	sum(case when 
+				cast(cast(date_part('year', dateadd(month, -1, tb1.eventdate)) as varchar(4)) + '-' + cast(date_part('month', dateadd(month, -1, tb1.eventdate)) as varchar(2)) + '-01' as date) = dr2.dt 
+					then dr2.QTYCoupons else 0 end) "mes-1",
+	sum(case when 
+			cast(cast(date_part('year', dateadd(month, -2, tb1.eventdate)) as varchar(4)) + '-' + cast(date_part('month', dateadd(month, -2, tb1.eventdate)) as varchar(2)) + '-01' as date)= dr2.dt 
+				then dr2.QTYCoupons else 0 end) "mes-2",
+	sum(case when 
+			cast(cast(date_part('year', dateadd(month, -3, tb1.eventdate)) as varchar(4)) + '-' + cast(date_part('month', dateadd(month, -3, tb1.eventdate)) as varchar(2)) + '-01' as date) = dr2.dt 
+				then dr2.QTYCoupons else 0 end) "mes-3",
+	case 
+		when (cupons_disponiveis-cupons_vendidos_pedido) = 0  or tb1.QTYCoupons = 0 or tb1.qtymenostrintadias = 0 then 0
+		when date_part('month', tb1.eventdate) = date_part('month', getdate()) then cast((cupons_disponiveis-cupons_vendidos_pedido) as decimal(12,2))/tb1.qtymenostrintadias 
+			else cast((cupons_disponiveis-cupons_vendidos_pedido) as decimal(12,2))/tb1.QTYCoupons end "Cobertura",		
+	case 
+		when VB = 0 or tb1.QTYCoupons = 0 then 0
+		else VB/tb1.QTYCoupons end Ticket_Medio,
+	case 
+		when VB = 0 or Rol = 0 then 0
+		else Rol/VB end Margem,
+	qtymenostrintadias,
+	status_de_ofativa,
+	Taxa_Extra,
+	Taxa_ExtraPU,
+	eventdate,
+	financecharge,
+	publishing_date,
+	deal_id,
+	data_source,
+	"Lucro_bruto_realizado",
+	"gmv"
+	--into stage.analiticoEcommerce	
+from (
+	select *
+		from venda	
+	union all
+	select 
+		ot_of.ownererp SalesExecutive,	
+		case 
+			when len(op.categoria_site_oferta) > 1 and op.categoria_site_oferta is not null then op.categoria_site_oferta
+			when len(offer.of_categoria_site) > 1 and offer.of_categoria_site is not null then offer.of_categoria_site
+			else contratoPU.categoria_site
+		end CategoryName,
+		case 
+			when len(op.subcategoria_site_oferta) > 1 and op.subcategoria_site_oferta is not null then op.subcategoria_site_oferta
+			when len(offer.of_subcategoria_site) > 1 and offer.of_subcategoria_site is not null then offer.of_subcategoria_site
+			else contratoPU.subcategoria_site
+		end SubcategoryName,
+		cast(op.contrato_pu as int) ContractID,
+		ac.accountname Nome_Parceiro,
+		offer.sugest_o_de_manchete Sugestao_de_manchete,
+		op.op_t_tulo_da_op_o Titulo_Opcao_Compra,
+		op.marca,
+		op.op_pre_o_original "preco_original",
+		op.op_pre_o_final "preco_com_desconto",
+		case when len(dll.idopcaodecompra) > 1 and dll.idopcaodecompra is not null then 1
+			else 0 end "status_de_opativa",
+		case when len(op.c_digo_ean) > 1 and op.c_digo_ean is not null then op.c_digo_ean
+			else 'N/A' end "codigo_ean",
+		isnull(dll.soldCupons, 0) "cupons_vendidos_pedido",
+		isnull(dll.available_units, 0) "cupons_disponiveis",
+		cast(contratoPU.description as varchar(255)) Description,
+		offer.name Nome_da_Oferta_Texto,
+		op.name Nome_da_Opcao_Texto,
+		dll.canonical_url Link, 
+		0 Rol,
+		0 "cancelamento_pre",
+		0 "cancelamento_pos",
+		0 "noshow",
+		0 VB,
+		0 RB,
+		0 QTYCoupons,
+		0 qtymenostrintadias,
+		case when len(dll.idoferta) > 1 and dll.idoferta is not null then 1
+			else 0 end "status_de_ofativa",
+		0 Taxa_Extra,
+		0 Taxa_ExtraPU,
+		trunc(getdate()) eventdate,
+		0 financecharge,
+		dll.publishing_date,
+		dll.deal_id,
+		2 data_source,
+		0 "Lucro_bruto_realizado",
+		0 "gmv"
+	from salesforce.ctOp_es_de_Compra op
+	left join salesforce.ctOfertas offer
+		on offer.Id = op.Id_da_Oferta
+	left join salesforce.ctcontratopu contratoPU
+		on contratoPU.id = offer.contrato_pu	
+	left join reports.account ac
+		on ac.accountid = contratoPU.account
+	left join opOnline dll 
+		on dll.idoferta = offer.c_digo_oferta_num_rico
+		and dll.idopcaodecompra = op.c_digo_opcao_n_merico
+	left join venda v
+		on v.Nome_da_Oferta_Texto = offer.name
+		and v.Nome_da_Opcao_Texto = op.name
+	left join reports.OwnerERP ownerE_of
+		on Upper(offer.propriet_rio_compartilhado_texto) = Upper(ownerE_of."Owner")
+	left join reports.OwnerTeam ot_of
+		on Upper(ownerE_of.OwnerERP) = Upper(ot_of.OwnerERP)
+	where 1=1
+	and contratoPU.ramo_de_atua_o ilike 'Com%rcio e Servi%os Online'
+	and op.createddate > dateadd(month, -6, getdate())
+	and v.Nome_da_Opcao_Texto is null
+	and ot_of.Team = 'Key Account (E-commerce)' 
+	group by
+		ot_of.ownererp,	
+		case 
+			when len(op.categoria_site_oferta) > 1 and op.categoria_site_oferta is not null then op.categoria_site_oferta
+			when len(offer.of_categoria_site) > 1 and offer.of_categoria_site is not null then offer.of_categoria_site
+			else contratoPU.categoria_site
+		end,
+		case 
+			when len(op.subcategoria_site_oferta) > 1 and op.subcategoria_site_oferta is not null then op.subcategoria_site_oferta
+			when len(offer.of_subcategoria_site) > 1 and offer.of_subcategoria_site is not null then offer.of_subcategoria_site
+			else contratoPU.subcategoria_site
+		end,
+		cast(op.contrato_pu as int),
+		ac.accountname,
+		offer.sugest_o_de_manchete,
+		op.op_t_tulo_da_op_o,
+		op.marca,
+		op.op_pre_o_original,
+		op.op_pre_o_final,
+		case when len(dll.idopcaodecompra) > 1 and dll.idopcaodecompra is not null then 1
+			else 0 end,
+		case when len(op.c_digo_ean) > 1 and op.c_digo_ean is not null then op.c_digo_ean
+			else 'N/A' end,
+		case when len(dll.idoferta) > 1 and dll.idoferta is not null then 1
+			else 0 end,
+		isnull(dll.soldCupons, 0),
+		isnull(dll.available_units, 0),
+		cast(contratoPU.description as varchar(255)),
+		offer.name,
+		op.name,
+		dll.canonical_url, 
+		trunc(getdate()),
+		dll.publishing_date,
+		dll.deal_id
+		) tb1
+		left join qtyseismeses dr2
+			on dr2.Nome_da_Oferta_Texto = cast(right(tb1.Nome_da_Oferta_Texto, 10) as int)
+			and dr2.Nome_da_Opcao_Texto = cast(right(tb1.Nome_da_Opcao_Texto, 10) as int)
+			and dr2.dt between cast(cast(date_part('year', dateadd(month, -3, tb1.eventdate)) as varchar(4)) + '-' + cast(date_part('month', dateadd(month, -3, tb1.eventdate)) as varchar(2)) + '-01' as date) 
+			and cast(cast(date_part('year', dateadd(month, -1, tb1.eventdate)) as varchar(4)) + '-' + cast(date_part('month', dateadd(month, -1, tb1.eventdate)) as varchar(2)) + '-01' as date)
+group by
+	UPPER(SalesExecutive),
+	CategoryName,
+	SubcategoryName,
+	ContractID,
+	Nome_Parceiro,
+	Sugestao_de_manchete,
+	Titulo_Opcao_Compra,
+	Marca,
+	preco_original,
+	preco_com_desconto,
+	status_de_opativa,
+	codigo_ean,
+	Description,
+	regexp_replace(tb1.Nome_da_Oferta_Texto, '\r|\n|\t','g'),
+	regexp_replace(tb1.Nome_da_Opcao_Texto, '\r|\n|\t','g'),
+	link,
+	Rol,
+	VB,
+	RB,
+	cancelamento_pre,
+	cancelamento_pos,
+	noshow,
+	tb1.QTYCoupons,
+	cupons_disponiveis,
+	cupons_vendidos_pedido,
+	cupons_disponiveis-cupons_vendidos_pedido,
+	case 
+		when (cupons_disponiveis-cupons_vendidos_pedido) = 0  or tb1.QTYCoupons = 0 or tb1.qtymenostrintadias = 0 then 0
+		when date_part('month', tb1.eventdate) = date_part('month', getdate()) then cast((cupons_disponiveis-cupons_vendidos_pedido) as decimal(12,2))/tb1.qtymenostrintadias 
+			else cast((cupons_disponiveis-cupons_vendidos_pedido) as decimal(12,2))/tb1.QTYCoupons end,	
+	case 
+		when tb1.QTYCoupons = 0  or cupons_vendidos_pedido = 0 then 0
+		else tb1.QTYCoupons/cast(cupons_vendidos_pedido as decimal(12,2)) end,
+	qtymenostrintadias,
+	status_de_ofativa,
+	Taxa_Extra,
+	Taxa_ExtraPU,
+	eventdate,
+	financecharge,
+	publishing_date,
+	deal_id,
+	data_source,
+	"Lucro_bruto_realizado",
+	"gmv";
+	
+analyze reports.analiticoEcommerce;
+
+commit;

@@ -1,0 +1,8 @@
+﻿	sale.UnifiedDiscountID in 
+		(
+		select unifiedDiscountId from ods.Discount d
+		inner join reports.discountpage dp
+		on d.DiscountId = dp.discountid
+		where dp.pageid = 3000339
+		group by unifiedDiscountId
+		)

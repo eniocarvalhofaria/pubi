@@ -1,0 +1,6 @@
+﻿		sale.UnifiedDiscountID in 
+		(
+			select unifiedDiscountId from ods.Discount where DiscountName like '%iPhone%'
+			and discountValue > 1000
+			group by unifiedDiscountId
+		)

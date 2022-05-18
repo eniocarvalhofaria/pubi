@@ -1,0 +1,227 @@
+
+drop table if exists #boPostalCode
+;
+select
+	buying_option_numeric_id buyingoptionnumericid
+,	cast(
+	case 
+		when len(AddressPostalCodechr) = 8
+		then 
+			case 
+				when substring(AddressPostalCodechr,1,1) between '0' and '9'
+				and substring(AddressPostalCodechr,2,1) between '0' and '9'
+				and substring(AddressPostalCodechr,3,1) between '0' and '9'
+				and substring(AddressPostalCodechr,4,1) between '0' and '9'
+				and substring(AddressPostalCodechr,5,1) between '0' and '9'
+				and substring(AddressPostalCodechr,6,1) between '0' and '9'
+				and substring(AddressPostalCodechr,7,1) between '0' and '9'
+				and substring(AddressPostalCodechr,8,1) between '0' and '9'
+				then AddressPostalCodechr
+				else null 
+			end
+		else null 
+	end as int)	OriginalAddressPostalCode
+into #boPostalCode
+from 
+(
+	select 
+		dlbo.buying_option_numeric_id 
+	,	trim(replace(
+		case 
+			when len(trim(replace(dlbo.account_zip_code,'-',''))) = 8 then dlbo.account_zip_code
+			when len(trim(replace(dl.account_zip_code,'-',''))) = 8 then dl.account_zip_code
+			when len(trim(replace(a.cep,'-',''))) = 8 then a.cep
+			else null 
+		end,'-','')) AddressPostalCodechr
+	from ods.mng_deals_latest dl
+	left join ods.mng_deals_latest_buying_options dlbo 
+	on dl.deal_numeric_id = dlbo.deal_numeric_id
+	left join salesforce.cfaccount a 
+	on a.id = dl.account_account_id
+	where dl.phoenix_type = 'Local'
+) x
+;
+
+drop table if exists  #boPostalCode2
+;
+select 
+	buyingoptionnumericid
+,	originalAddressPostalCode
+,	1 isValidAddressPostalCode
+,	originalAddressPostalCode AddressPostalCode
+into #boPostalCode2
+from #boPostalCode bo 
+inner join reports.geoaddress ga 
+on bo.originalAddressPostalCode = ga.AddressPostalCode
+;
+delete from #boPostalCode 
+where originalAddressPostalCode in 
+(
+	select distinct originalAddressPostalCode from #boPostalCode2
+)
+;
+
+insert into #boPostalCode2
+
+select 
+	bopc.buyingoptionnumericid
+,	bopc.originalAddressPostalCode
+,	0 isValidAddressPostalCode
+,	y.AddressPostalCode AddressPostalCode
+from #boPostalCode bopc
+inner join 
+(
+	select 
+		originalAddressPostalCode
+	,	AddressPostalCode AddressPostalCode
+	from 
+	(
+		select 
+			originalAddressPostalCode
+		,	garange.AddressPostalCode
+		,	rank() over
+			(
+				partition by 
+				bo.originalAddressPostalCode 
+				order by 
+				case 
+					when bo.originalAddressPostalCode > garange.AddressPostalCode
+					then bo.originalAddressPostalCode - garange.AddressPostalCode
+					else garange.AddressPostalCode - bo.originalAddressPostalCode
+				end
+			,	garange.AddressPostalCode
+			) sortorder
+		from (select distinct originalAddressPostalCode from #boPostalCode) bo 
+		inner join 
+			(
+			select 
+				AddressPostalCode
+			,	(AddressPostalCode/1000)*1000 AddressPostalCodeStart
+			,	((AddressPostalCode/1000)*1000) +1000 -1 AddressPostalCodeEnd
+			from reports.geoaddress ga 
+			) garange
+		on bo.originalAddressPostalCode between AddressPostalCodeStart and AddressPostalCodeEnd
+	) x
+	where sortorder = 1
+) y 
+on bopc.originalAddressPostalCode = y.originalAddressPostalCode
+	;
+delete from #boPostalCode 
+where originalAddressPostalCode in 
+(
+	select distinct originalAddressPostalCode from #boPostalCode2
+)
+;
+
+
+insert into #boPostalCode2
+
+select 
+	bopc.buyingoptionnumericid
+,	bopc.originalAddressPostalCode
+,	0 isValidAddressPostalCode
+,	y.AddressPostalCode AddressPostalCode
+from #boPostalCode bopc
+inner join 
+(
+	select 
+		originalAddressPostalCode
+	,	AddressPostalCode AddressPostalCode
+	from 
+	(
+		select 
+			originalAddressPostalCode
+		,	garange.AddressPostalCode
+		,	rank() over
+			(
+				partition by 
+				bo.originalAddressPostalCode 
+				order by 
+				case 
+					when bo.originalAddressPostalCode > garange.AddressPostalCode
+					then bo.originalAddressPostalCode - garange.AddressPostalCode
+					else garange.AddressPostalCode - bo.originalAddressPostalCode
+				end
+			,	garange.AddressPostalCode
+			) sortorder
+		from (select distinct originalAddressPostalCode from #boPostalCode) bo 
+		inner join 
+			(
+			select 
+				AddressPostalCode
+			,	(AddressPostalCode/1000000)*1000000 AddressPostalCodeStart
+			,	((AddressPostalCode/1000000)*1000000) +1000000 -1 AddressPostalCodeEnd
+			from reports.geoaddress ga 
+			) garange
+		on bo.originalAddressPostalCode between AddressPostalCodeStart and AddressPostalCodeEnd
+	) x
+	where sortorder = 1
+) y 
+on bopc.originalAddressPostalCode = y.originalAddressPostalCode
+	;
+delete from #boPostalCode 
+where originalAddressPostalCode in 
+(
+	select distinct originalAddressPostalCode from #boPostalCode2
+)
+;
+
+insert into #boPostalCode2
+
+select 
+	bopc.buyingoptionnumericid
+,	bopc.originalAddressPostalCode
+,	0 isValidAddressPostalCode
+,	y.AddressPostalCode AddressPostalCode
+from #boPostalCode bopc
+inner join 
+(
+	select 
+		originalAddressPostalCode
+	,	AddressPostalCode AddressPostalCode
+	from 
+	(
+		select 
+			originalAddressPostalCode
+		,	garange.AddressPostalCode
+		,	rank() over
+			(
+				partition by 
+				bo.originalAddressPostalCode 
+				order by 
+				case 
+					when bo.originalAddressPostalCode > garange.AddressPostalCode
+					then bo.originalAddressPostalCode - garange.AddressPostalCode
+					else garange.AddressPostalCode - bo.originalAddressPostalCode
+				end
+			,	garange.AddressPostalCode
+			) sortorder
+		from (select distinct originalAddressPostalCode from #boPostalCode) bo 
+		inner join 
+			(
+			select 
+				AddressPostalCode
+			,	(AddressPostalCode/100000000)*100000000 AddressPostalCodeStart
+			,	((AddressPostalCode/100000000)*100000000) +100000000 -1 AddressPostalCodeEnd
+			from reports.geoaddress ga 
+			) garange
+		on bo.originalAddressPostalCode between AddressPostalCodeStart and AddressPostalCodeEnd
+	) x
+	where sortorder = 1
+) y 
+on bopc.originalAddressPostalCode = y.originalAddressPostalCode
+	;
+delete from #boPostalCode 
+where originalAddressPostalCode in 
+(
+	select distinct originalAddressPostalCode from #boPostalCode2
+)
+;
+
+delete from reports.BuyingOptionPostalCode
+;
+insert into reports.BuyingOptionPostalCode
+select * from #boPostalCode2
+;
+;
+

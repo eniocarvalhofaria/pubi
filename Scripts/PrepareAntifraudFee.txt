@@ -1,0 +1,108 @@
+
+drop table if exists #antifraud
+;
+
+select distinct * 
+into #antifraud
+from 
+
+(
+select 
+	c.antifraudproviderid
+,	a.purchasepaymentdataid
+,	date_trunc('month',a.startdate) monthdate
+,	case when rank() over(partition by a.purchasepaymentdataid,c.antifraudproviderid order by a.lastupdate desc) = 1 then 1 else 0 end isLastStatus
+from ods.paymentantifraud a
+inner join reports.paymentantifraudclass c 
+on a.paymentantifraudclassid = c.paymentantifraudclassid
+left join reports.antifraudfee aff
+on a.purchasepaymentdataid = aff.purchasepaymentdataid
+and c.antifraudproviderid = aff.antifraudproviderid
+where
+	aff.purchasepaymentdataid is null
+and (a.isfromreprovedpayment is null or a.isfromreprovedpayment = 0)
+and a.laststatusid is not null
+) x
+where isLastStatus = 1
+
+;
+
+drop table if exists #AntifraudVolume
+;
+select 
+	c.antifraudproviderid
+,	cast(date_trunc('month' ,startdate) as date) monthDate
+,	count(distinct f.purchasepaymentdataid) qty
+into #AntifraudVolume
+from ods.paymentantifraud f
+inner join reports.paymentantifraudclass c 
+on f.paymentantifraudclassid = c.paymentantifraudclassid
+where (isfromreprovedpayment is null or isfromreprovedpayment = 0)
+and cast(date_trunc('month' ,startdate) as date)  < cast(date_trunc('month' ,getdate()) as date)
+group by 1,2
+;
+insert into #AntifraudVolume
+select 
+	antifraudproviderid
+,	cast(date_trunc('month' ,getdate()) as date) monthDate
+,	qty
+from #AntifraudVolume
+where monthDate = dateadd(month,-1,cast(date_trunc('month' ,getdate()) as date))
+; 
+
+drop table if exists #antifraudfeeCalculation
+;
+select 
+	a.antifraudproviderid
+, 	a.monthDate
+,	case
+  		when r.valuefixedbill = 1
+  		then r.totalvalue/a.qty
+  		else r.valueperorder
+ 	end valueperorder
+into #antifraudfeeCalculation
+from #AntifraudVolume a
+inner join reports.AntiFraudCalculationRule r
+on a.monthDate between r.startDate and r.endDate
+and r.antifraudproviderid = a.antifraudproviderid
+and a.qty between r.startordercount and r.endordercount
+;
+
+drop table if exists #antifraudfee
+;
+CREATE TABLE #antifraudfee
+(
+	"purchasepaymentdataid" INTEGER   ENCODE lzo
+	,"monthdate" TIMESTAMP WITHOUT TIME ZONE   ENCODE lzo
+	,"eventdate" DATE   ENCODE lzo
+	,"antifraudfee" NUMERIC(38,22)   ENCODE lzo
+	,"purchaseid" INTEGER   
+	, antifraudproviderid int 
+)
+DISTSTYLE KEY
+DISTKEY ("purchasepaymentdataid")
+SORTKEY ("purchasepaymentdataid",eventdate)
+;
+insert into #antifraudfee
+select 
+	af.purchasepaymentdataid
+,	af.monthdate
+,	cast(pur.purchaseinitiated as date) EventDate
+,	coalesce(fc.valueperOrder / count(1) over(partition by af.purchasepaymentdataid,af.antifraudproviderid),0) AntifraudFee
+,	pur.purchaseid
+,	af.antifraudproviderid
+from #antifraud af 
+inner join ods.purchasepaymentdata ppd 
+on af.purchasepaymentdataid = ppd.purchasepaymentdataid
+inner join ods.purchase pur 
+on ppd.internalreferencenumber = pur.purchaseid
+left join #antifraudfeeCalculation fc
+on af.monthdate = fc.monthdate
+and fc.antifraudproviderid = af.antifraudproviderid
+;
+
+
+
+insert into reports.antifraudfee
+select * from #antifraudfee
+;
